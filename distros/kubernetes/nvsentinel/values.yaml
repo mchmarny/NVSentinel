@@ -145,7 +145,7 @@ global:
       # Enable XID analyzer sidecar for enhanced GPU error analysis
       enabled: false
 
-  # Labeler Module - applies labels to nodes based on health status and capabilities
+  # Labeler Module - applies labels to nodes based on GPU operator's operands which determine the components of NVSentinel enabled on a node
   labeler:
     # Enable labeler module
     enabled: true
