@@ -81,7 +81,7 @@ global:
         tag: "1.37.0"
         pullPolicy: IfNotPresent
 
-  # Health Events Analyzer - analyzes health events and determines remediation actions
+  # Health Events Analyzer - analyzes historic health events and determines remediation actions
   healthEventsAnalyzer:
     # Enable health events analyzer component
     enabled: false
