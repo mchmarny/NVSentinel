@@ -22,7 +22,7 @@ global:
   # Default port for Prometheus metrics endpoint across all components
   metricsPort: 2112
   
-  # Node selector for general workloads - used to constrain pods to nodes with specific labels
+  # Node selector for global components - used to constrain pods to nodes with specific labels
   # Example: kubernetes.io/hostname: specific-node
   nodeSelector: {}
   
@@ -38,7 +38,7 @@ global:
   # Example: prometheus.io/scrape: "true"
   podAnnotations: {}
   
-  # Node selector for system-level components (platform-connectors, monitoring services)
+  # Node selector for control plane components (platform-connectors, monitoring services)
   # Used to schedule critical infrastructure components on specific nodes
   systemNodeSelector: {}
   
