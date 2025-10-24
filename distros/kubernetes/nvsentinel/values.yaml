@@ -175,7 +175,7 @@ global:
         tag: "2.5.2"
         pullPolicy: IfNotPresent
 
-  # In-cluster File Server - serves log files and diagnostic data
+  # In-cluster File Server - stores log files
   inclusterFileServer:
     # Enable in-cluster file server for log collection
     enabled: false
