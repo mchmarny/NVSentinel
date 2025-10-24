@@ -26,11 +26,11 @@ global:
   # Example: kubernetes.io/hostname: specific-node
   nodeSelector: {}
   
-  # Tolerations for general workloads - allows pods to schedule on nodes with matching taints
+  # Tolerations for global workloads - allows pods to schedule on nodes with matching taints
   # Example: - key: "nvidia.com/gpu", operator: "Exists", effect: "NoSchedule"
   tolerations: []
   
-  # Affinity rules for general workloads - defines pod scheduling preferences and requirements
+  # Affinity rules for global workloads - defines pod scheduling preferences and requirements
   # Example: podAntiAffinity to spread pods across nodes
   affinity: {}
   
