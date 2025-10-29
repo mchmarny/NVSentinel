@@ -162,25 +162,32 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 	// Check node metadata (runtime version, labels, annotations)
 	result.AttemptedMethods = append(result.AttemptedMethods, DetectionMethodKubernetesAPI)
 	start := time.Now()
+
 	if d.checkNodeMetadata(node) {
 		result.IsKata = true
 		result.Method = DetectionMethodKubernetesAPI
 		duration := time.Since(start)
 
 		if d.enableMetrics && metricsEnabled {
-			detectionAttempts.WithLabelValues(d.nodeName, string(DetectionMethodKubernetesAPI), "true").Inc()
-			detectionDuration.WithLabelValues(d.nodeName, string(DetectionMethodKubernetesAPI), "true").Observe(duration.Seconds())
+			detectionAttempts.WithLabelValues(
+				d.nodeName, string(DetectionMethodKubernetesAPI), "true").Inc()
+			detectionDuration.WithLabelValues(
+				d.nodeName, string(DetectionMethodKubernetesAPI), "true").Observe(duration.Seconds())
 		}
 
 		slog.Info("Kata Containers detected via Kubernetes API", "node", d.nodeName)
 		d.recordDetectionResult(result)
+
 		return result, nil
 	}
 
 	if d.enableMetrics && metricsEnabled {
 		duration := time.Since(start)
-		detectionAttempts.WithLabelValues(d.nodeName, string(DetectionMethodKubernetesAPI), "true").Inc()
-		detectionDuration.WithLabelValues(d.nodeName, string(DetectionMethodKubernetesAPI), "false").Observe(duration.Seconds())
+
+		detectionAttempts.WithLabelValues(
+			d.nodeName, string(DetectionMethodKubernetesAPI), "true").Inc()
+		detectionDuration.WithLabelValues(
+			d.nodeName, string(DetectionMethodKubernetesAPI), "false").Observe(duration.Seconds())
 	}
 
 	// Record final result
