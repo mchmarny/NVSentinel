@@ -337,6 +337,7 @@ func (d *Detector) waitForDetectionResult(
 	case m := <-resultChan:
 		if m != "" {
 			method = m
+
 			result.IsKata = true
 			result.Method = method
 			cancel()
@@ -503,6 +504,7 @@ func (d *Detector) detectViaRuntimeClass(ctx context.Context) (bool, error) {
 
 		if strings.Contains(handler, "kata") {
 			slog.Debug("Kata RuntimeClass detected", "name", rc.Name, "handler", rc.Handler)
+
 			hasKata = true
 
 			break
