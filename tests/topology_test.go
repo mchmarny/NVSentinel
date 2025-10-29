@@ -162,7 +162,6 @@ func TestKataTopology(t *testing.T) {
 				nodeValidated := false
 				for _, pod := range syslogPods {
 					podKataLabel, hasPodLabel := pod.Labels["nvsentinel.dgxc.nvidia.com/kata"]
-
 					if kataEnabled == "true" {
 						assert.True(t, hasPodLabel, "Kata node %s has syslog pod without kata label", nodeName)
 						assert.Equal(t, "true", podKataLabel, "Kata node %s has syslog pod with wrong kata label: %s", nodeName, podKataLabel)
