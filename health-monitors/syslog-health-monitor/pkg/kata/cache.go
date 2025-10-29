@@ -50,6 +50,7 @@ func (cd *CachedDetector) IsKataEnabled(ctx context.Context) (*DetectionResult, 
 	if cd.cachedResult != nil && time.Since(cd.cachedAt) < cd.cacheTTL {
 		result := cd.cachedResult
 		cd.mu.RUnlock()
+
 		return result, nil
 	}
 	cd.mu.RUnlock()

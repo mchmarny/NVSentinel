@@ -177,8 +177,11 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 
 	// Require clientset for API-based detection
 	if d.clientset == nil {
-		err := fmt.Errorf("kubernetes clientset required for kata detection (filesystem detection disabled due to false positives)")
 		slog.Error("Detection failed: no Kubernetes API access", "node", d.nodeName)
+		err := fmt.Errorf(
+			"kubernetes clientset required for kata detection",
+		)
+
 		return nil, err
 	}
 
@@ -213,6 +216,7 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 			case <-gctx.Done():
 			}
 		}
+
 		return nil
 	})
 
@@ -233,6 +237,7 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("runtime class detection: %w", err))
 			slog.Warn("RuntimeClass-based Kata detection failed", "error", err)
+
 			return nil
 		}
 
@@ -243,19 +248,23 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 			case <-gctx.Done():
 			}
 		}
+
 		return nil
 	})
 
 	// Wait for all goroutines to complete and close channel
 	go func() {
-		g.Wait()
+		_ = g.Wait() // Errors already collected in result.Errors
 		close(resultChan)
 	}()
 
 	// Wait for first positive result or all to complete
+	method := DetectionMethodNone
+
 	select {
-	case method := <-resultChan:
-		if method != "" {
+	case m := <-resultChan:
+		if m != "" {
+			method = m
 			result.IsKata = true
 			result.Method = method
 			cancel() // Stop other goroutines
@@ -264,6 +273,7 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 		if d.enableMetrics {
 			detectionResults.WithLabelValues(d.nodeName, "timeout").Inc()
 		}
+
 		return nil, ctx.Err()
 	}
 
@@ -315,15 +325,33 @@ func (d *Detector) getNode(ctx context.Context) (*corev1.Node, error) {
 // checkNodeMetadata examines node metadata for Kata indicators
 // This replaces detectViaKubernetesAPI and accepts a pre-fetched node
 func (d *Detector) checkNodeMetadata(node *corev1.Node) bool {
-
 	// Check 1: Examine container runtime version
+	if d.checkRuntimeVersion(node) {
+		return true
+	}
+
+	// Check 2: Look for Kata-related node labels
+	if d.checkNodeLabels(node) {
+		return true
+	}
+
+	// Check 3: Examine node annotations for Kata configuration
+	return d.checkNodeAnnotations(node)
+}
+
+// checkRuntimeVersion examines the container runtime version for Kata indicators
+func (d *Detector) checkRuntimeVersion(node *corev1.Node) bool {
 	runtime := strings.ToLower(node.Status.NodeInfo.ContainerRuntimeVersion)
 	if strings.Contains(runtime, "kata") {
 		slog.Debug("Kata detected in container runtime version", "runtime", runtime)
 		return true
 	}
 
-	// Check 2: Look for Kata-related node labels
+	return false
+}
+
+// checkNodeLabels looks for Kata-related node labels
+func (d *Detector) checkNodeLabels(node *corev1.Node) bool {
 	kataLabels := []string{
 		"katacontainers.io/kata-runtime",
 		"kata-containers.io/runtime",
@@ -333,17 +361,25 @@ func (d *Detector) checkNodeMetadata(node *corev1.Node) bool {
 	}
 
 	for _, label := range kataLabels {
-		if value, exists := node.Labels[label]; exists {
-			// Check if label value indicates enabled (could be "true", "enabled", "1", etc.)
-			lowerValue := strings.ToLower(value)
-			if lowerValue == "true" || lowerValue == "enabled" || lowerValue == "1" || lowerValue == "yes" {
-				slog.Debug("Kata detected via node label", "label", label, "value", value)
-				return true
-			}
+		value, exists := node.Labels[label]
+		if !exists {
+			continue
+		}
+
+		// Check if label value indicates enabled (could be "true", "enabled", "1", etc.)
+		lowerValue := strings.ToLower(value)
+
+		if lowerValue == "true" || lowerValue == "enabled" || lowerValue == "1" || lowerValue == "yes" {
+			slog.Debug("Kata detected via node label", "label", label, "value", value)
+			return true
 		}
 	}
 
-	// Check 3: Examine node annotations for Kata configuration
+	return false
+}
+
+// checkNodeAnnotations examines node annotations for Kata configuration
+func (d *Detector) checkNodeAnnotations(node *corev1.Node) bool {
 	kataAnnotations := []string{
 		"kata-runtime.io/enabled",
 		"io.katacontainers.config",
@@ -367,7 +403,12 @@ func (d *Detector) detectViaRuntimeClass(ctx context.Context) (bool, error) {
 	if time.Since(d.rcCache.lastChecked) < d.rcCache.ttl {
 		result := d.rcCache.hasKata
 		d.rcCache.mu.RUnlock()
-		slog.Debug("Using cached RuntimeClass detection result", "hasKata", result, "age", time.Since(d.rcCache.lastChecked))
+		slog.Debug(
+			"Using cached RuntimeClass detection result",
+			"hasKata", result,
+			"age", time.Since(d.rcCache.lastChecked),
+		)
+
 		return result, nil
 	}
 	d.rcCache.mu.RUnlock()
@@ -380,11 +421,14 @@ func (d *Detector) detectViaRuntimeClass(ctx context.Context) (bool, error) {
 
 	// Check for Kata runtime handlers
 	hasKata := false
+
 	for _, rc := range rcList.Items {
 		handler := strings.ToLower(rc.Handler)
+
 		if strings.Contains(handler, "kata") {
 			slog.Debug("Kata RuntimeClass detected", "name", rc.Name, "handler", rc.Handler)
 			hasKata = true
+
 			break
 		}
 	}
