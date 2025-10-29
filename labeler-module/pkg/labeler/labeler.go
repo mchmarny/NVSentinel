@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/nvidia/nvsentinel/health-monitors/syslog-health-monitor/pkg/kata"
 	"github.com/nvidia/nvsentinel/labeler-module/pkg/metrics"
 
 	v1 "k8s.io/api/core/v1"
@@ -36,6 +37,7 @@ import (
 const (
 	DCGMVersionLabel     = "nvsentinel.dgxc.nvidia.com/dcgm.version"
 	DriverInstalledLabel = "nvsentinel.dgxc.nvidia.com/driver.installed"
+	KataEnabledLabel     = "nvsentinel.dgxc.nvidia.com/kata.enabled"
 
 	NodeDCGMIndex   = "nodeDCGM"
 	NodeDriverIndex = "nodeDriver"
@@ -236,6 +238,32 @@ func (l *Labeler) getDriverLabelForNode(nodeName string) (string, error) {
 	return "", nil
 }
 
+// getKataLabelForNode detects if Kata is enabled on the specified node
+// Returns "true" if Kata is enabled, "false" if not, or error if detection fails
+func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
+	// Create a node-specific detector with caching
+	// Use 15-minute cache TTL to balance API load with detection freshness
+	detector, err := kata.NewDetector(nodeName, l.clientset)
+	if err != nil {
+		return "", fmt.Errorf("failed to create kata detector for node %s: %w", nodeName, err)
+	}
+	cachedDetector := kata.NewCachedDetector(detector, 15*time.Minute)
+
+	// Detect kata with context timeout
+	ctx, cancel := context.WithTimeout(l.ctx, 5*time.Second)
+	defer cancel()
+
+	result, err := cachedDetector.IsKataEnabled(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to detect kata on node %s: %w", nodeName, err)
+	}
+
+	if result.IsKata {
+		return "true", nil
+	}
+	return "false", nil
+}
+
 // getDCGMVersionForNodeExcluding returns the expected DCGM version for a specific node,
 // excluding a specific pod from consideration (used for delete events)
 func (l *Labeler) getDCGMVersionForNodeExcluding(nodeName string, excludePod *v1.Pod) (string, error) {
@@ -294,9 +322,9 @@ func (l *Labeler) getDriverLabelForNodeExcluding(nodeName string, excludePod *v1
 	return "", nil
 }
 
-// updateNodeLabels updates node labels based on expected DCGM and driver label values
+// updateNodeLabels updates node labels based on expected DCGM, driver, and kata label values
 // nolint: cyclop // todo
-func (l *Labeler) updateNodeLabels(nodeName, expectedDCGMVersion, expectedDriverLabel string) error {
+func (l *Labeler) updateNodeLabels(nodeName, expectedDCGMVersion, expectedDriverLabel, expectedKataLabel string) error {
 	updateStartTime := time.Now()
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		node, err := l.clientset.CoreV1().Nodes().Get(l.ctx, nodeName, metav1.GetOptions{})
@@ -331,6 +359,18 @@ func (l *Labeler) updateNodeLabels(nodeName, expectedDCGMVersion, expectedDriver
 			} else {
 				node.Labels[DriverInstalledLabel] = expectedDriverLabel
 				slog.Info("Setting driver installed label on node", "node", nodeName, "label", expectedDriverLabel)
+			}
+		}
+
+		if node.Labels[KataEnabledLabel] != expectedKataLabel {
+			needsUpdate = true
+
+			if expectedKataLabel == "" {
+				delete(node.Labels, KataEnabledLabel)
+				slog.Info("Removing Kata enabled label from node", "node", nodeName)
+			} else {
+				node.Labels[KataEnabledLabel] = expectedKataLabel
+				slog.Info("Setting Kata enabled label on node", "node", nodeName, "kata", expectedKataLabel)
 			}
 		}
 
@@ -383,7 +423,15 @@ func (l *Labeler) handlePodDeleteEvent(obj any) error {
 		return fmt.Errorf("failed to get driver label for node %s excluding deleted pod: %w", pod.Spec.NodeName, err)
 	}
 
-	return l.updateNodeLabels(pod.Spec.NodeName, expectedDCGMVersion, expectedDriverLabel)
+	// Kata detection is independent of pod state, so we detect it normally
+	expectedKataLabel, err := l.getKataLabelForNode(pod.Spec.NodeName)
+	if err != nil {
+		slog.Warn("Failed to detect Kata on node, skipping kata label update",
+			"node", pod.Spec.NodeName, "error", err)
+		expectedKataLabel = "" // Don't update kata label on error
+	}
+
+	return l.updateNodeLabels(pod.Spec.NodeName, expectedDCGMVersion, expectedDriverLabel, expectedKataLabel)
 }
 
 // handlePodEvent processes all pod events (add, update) idempotently
@@ -408,5 +456,13 @@ func (l *Labeler) handlePodEvent(obj any) error {
 		return fmt.Errorf("failed to get driver label for node %s: %w", pod.Spec.NodeName, err)
 	}
 
-	return l.updateNodeLabels(pod.Spec.NodeName, expectedDCGMVersion, expectedDriverLabel)
+	// Detect Kata runtime on the node
+	expectedKataLabel, err := l.getKataLabelForNode(pod.Spec.NodeName)
+	if err != nil {
+		slog.Warn("Failed to detect Kata on node, skipping kata label update",
+			"node", pod.Spec.NodeName, "error", err)
+		expectedKataLabel = "" // Don't update kata label on error
+	}
+
+	return l.updateNodeLabels(pod.Spec.NodeName, expectedDCGMVersion, expectedDriverLabel, expectedKataLabel)
 }

@@ -16,198 +16,29 @@ package kata
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestDetector_IsKataEnabled_FilesystemDetection(t *testing.T) {
-	tests := []struct {
-		name           string
-		setupFunc      func(t *testing.T) string // Returns temp dir path
-		expectedResult bool
-		wantErr        bool
-	}{
-		{
-			name: "no kata indicators - should return false",
-			setupFunc: func(t *testing.T) string {
-				return t.TempDir()
-			},
-			expectedResult: false,
-			wantErr:        false,
-		},
+func TestDetector_IsKataEnabled_NoClientset(t *testing.T) {
+	ctx := context.Background()
+
+	// Detector without clientset should fail as API detection is required
+	detector, err := NewDetector("test-node", nil, WithMetrics(false))
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			detector := NewDetector("test-node", nil)
-
-			got, err := detector.IsKataEnabled(ctx)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("IsKataEnabled() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.expectedResult {
-				t.Errorf("IsKataEnabled() = %v, want %v", got, tt.expectedResult)
-			}
-		})
-	}
-}
-
-func TestDetector_checkCgroupForKata(t *testing.T) {
-	tests := []struct {
-		name           string
-		cgroupContent  string
-		expectedResult bool
-		wantErr        bool
-	}{
-		{
-			name: "kata detected in cgroup path",
-			cgroupContent: `12:perf_event:/kata-containers/abc123
-11:hugetlb:/kata-containers/abc123
-10:freezer:/kata-containers/abc123`,
-			expectedResult: true,
-			wantErr:        false,
-		},
-		{
-			name: "kata-runtime in cgroup",
-			cgroupContent: `12:perf_event:/system.slice/kata-runtime.service
-11:hugetlb:/system.slice/kata-runtime.service`,
-			expectedResult: true,
-			wantErr:        false,
-		},
-		{
-			name: "io.katacontainers in cgroup",
-			cgroupContent: `0::/io.katacontainers.sandbox/abc123
-1:name=systemd:/io.katacontainers.sandbox/abc123`,
-			expectedResult: true,
-			wantErr:        false,
-		},
-		{
-			name: "regular containerd cgroup - no kata",
-			cgroupContent: `12:perf_event:/system.slice/containerd.service
-11:hugetlb:/system.slice/containerd.service
-10:freezer:/kubepods/besteffort/pod123`,
-			expectedResult: false,
-			wantErr:        false,
-		},
-		{
-			name: "docker cgroup - no kata",
-			cgroupContent: `12:perf_event:/docker/abc123
-11:hugetlb:/docker/abc123`,
-			expectedResult: false,
-			wantErr:        false,
-		},
-		{
-			name:           "empty cgroup file",
-			cgroupContent:  "",
-			expectedResult: false,
-			wantErr:        false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create temporary cgroup file
-			tmpDir := t.TempDir()
-			cgroupPath := filepath.Join(tmpDir, "cgroup")
-
-			if err := os.WriteFile(cgroupPath, []byte(tt.cgroupContent), 0600); err != nil {
-				t.Fatalf("Failed to create test cgroup file: %v", err)
-			}
-
-			detector := NewDetector("test-node", nil)
-			got, err := detector.checkCgroupForKata(cgroupPath)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("checkCgroupForKata() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.expectedResult {
-				t.Errorf("checkCgroupForKata() = %v, want %v", got, tt.expectedResult)
-			}
-		})
-	}
-}
-
-func TestDetector_checkForVMHypervisor(t *testing.T) {
-	tests := []struct {
-		name           string
-		cpuinfoContent string
-		expectedResult bool
-		wantErr        bool
-	}{
-		{
-			name: "hypervisor flag present",
-			cpuinfoContent: `processor	: 0
-vendor_id	: GenuineIntel
-cpu family	: 6
-model		: 85
-flags		: fpu vme de pse tsc msr pae hypervisor constant_tsc`,
-			expectedResult: true,
-			wantErr:        false,
-		},
-		{
-			name: "qemu hypervisor detected",
-			cpuinfoContent: `processor	: 0
-vendor_id	: GenuineIntel
-model name	: QEMU Virtual CPU version 2.5+`,
-			expectedResult: true,
-			wantErr:        false,
-		},
-		{
-			name: "kvm detected",
-			cpuinfoContent: `processor	: 0
-hypervisor	: KVM
-vendor_id	: GenuineIntel`,
-			expectedResult: true,
-			wantErr:        false,
-		},
-		{
-			name: "physical hardware - no hypervisor",
-			cpuinfoContent: `processor	: 0
-vendor_id	: GenuineIntel
-cpu family	: 6
-model		: 85
-flags		: fpu vme de pse tsc msr pae mce cx8 apic sep`,
-			expectedResult: false,
-			wantErr:        false,
-		},
-		{
-			name:           "empty cpuinfo",
-			cpuinfoContent: "",
-			expectedResult: false,
-			wantErr:        false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Create temporary cpuinfo file
-			tmpDir := t.TempDir()
-			cpuinfoPath := filepath.Join(tmpDir, "cpuinfo")
-
-			if err := os.WriteFile(cpuinfoPath, []byte(tt.cpuinfoContent), 0600); err != nil {
-				t.Fatalf("Failed to create test cpuinfo file: %v", err)
-			}
-
-			detector := NewDetector("test-node", nil)
-			got, err := detector.checkForVMHypervisor(cpuinfoPath)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("checkForVMHypervisor() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if got != tt.expectedResult {
-				t.Errorf("checkForVMHypervisor() = %v, want %v", got, tt.expectedResult)
-			}
-		})
+	// Should error since filesystem detection is disabled
+	_, err = detector.IsKataEnabled(ctx)
+	if err == nil {
+		t.Error("IsKataEnabled() should return error when no clientset provided")
 	}
 }
 
@@ -339,18 +170,16 @@ func TestDetector_detectViaKubernetesAPI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
 			clientset := fake.NewSimpleClientset(tt.node)
-			detector := NewDetector("test-node", clientset)
-
-			got, err := detector.detectViaKubernetesAPI(ctx)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("detectViaKubernetesAPI() error = %v, wantErr %v", err, tt.wantErr)
-				return
+			detector, err := NewDetector("test-node", clientset, WithMetrics(false))
+			if err != nil {
+				t.Fatalf("Failed to create detector: %v", err)
 			}
+
+			got := detector.checkNodeMetadata(tt.node)
+
 			if got != tt.expectedResult {
-				t.Errorf("detectViaKubernetesAPI() = %v, want %v", got, tt.expectedResult)
+				t.Errorf("checkNodeMetadata() = %v, want %v", got, tt.expectedResult)
 			}
 		})
 	}
@@ -359,11 +188,14 @@ func TestDetector_detectViaKubernetesAPI(t *testing.T) {
 func TestDetector_detectViaKubernetesAPI_NodeNotFound(t *testing.T) {
 	ctx := context.Background()
 	clientset := fake.NewSimpleClientset() // Empty clientset
-	detector := NewDetector("non-existent-node", clientset)
+	detector, err := NewDetector("non-existent-node", clientset, WithMetrics(false))
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
+	}
 
-	_, err := detector.detectViaKubernetesAPI(ctx)
+	_, err = detector.getNode(ctx)
 	if err == nil {
-		t.Error("detectViaKubernetesAPI() expected error for non-existent node, got nil")
+		t.Error("getNode() expected error for non-existent node, got nil")
 	}
 }
 
@@ -371,7 +203,10 @@ func TestNewDetector(t *testing.T) {
 	nodeName := "test-node"
 	clientset := fake.NewSimpleClientset()
 
-	detector := NewDetector(nodeName, clientset)
+	detector, err := NewDetector(nodeName, clientset, WithMetrics(false))
+	if err != nil {
+		t.Fatalf("NewDetector() failed: %v", err)
+	}
 
 	if detector == nil {
 		t.Fatal("NewDetector() returned nil")
@@ -400,31 +235,18 @@ func TestDetector_IsKataEnabled_WithAPIFallback(t *testing.T) {
 	}
 
 	clientset := fake.NewSimpleClientset(node)
-	detector := NewDetector("test-node", clientset)
+	detector, err := NewDetector("test-node", clientset, WithMetrics(false))
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
+	}
 
-	// Even if filesystem detection fails, API should detect it
-	got, err := detector.IsKataEnabled(ctx)
+	// API should detect it
+	result, err := detector.IsKataEnabled(ctx)
 	if err != nil {
 		t.Errorf("IsKataEnabled() unexpected error: %v", err)
 	}
-	if !got {
-		t.Error("IsKataEnabled() should detect kata via API fallback")
-	}
-}
-
-func TestDetector_IsKataEnabled_NoClientset(t *testing.T) {
-	ctx := context.Background()
-
-	// Detector without clientset should only use filesystem detection
-	detector := NewDetector("test-node", nil)
-
-	// Should not error, just return false when no indicators found
-	got, err := detector.IsKataEnabled(ctx)
-	if err != nil {
-		t.Errorf("IsKataEnabled() unexpected error: %v", err)
-	}
-	if got {
-		t.Error("IsKataEnabled() should return false when no kata indicators found")
+	if !result.IsKata {
+		t.Error("IsKataEnabled() should detect kata via API")
 	}
 }
 
@@ -453,12 +275,298 @@ func TestNewDetector_UsesDefaultTimeout(t *testing.T) {
 	nodeName := "test-node"
 	clientset := fake.NewSimpleClientset()
 
-	detector := NewDetector(nodeName, clientset)
+	detector, err := NewDetector(nodeName, clientset, WithMetrics(false))
+	if err != nil {
+		t.Fatalf("NewDetector() failed: %v", err)
+	}
 
 	if detector == nil {
 		t.Fatal("NewDetector() returned nil")
 	}
 	if detector.detectionTimeout != DefaultDetectionTimeout {
 		t.Errorf("NewDetector() timeout = %v, want %v", detector.detectionTimeout, DefaultDetectionTimeout)
+	}
+}
+
+func TestNewDetector_WithOptions(t *testing.T) {
+	nodeName := "test-node"
+	clientset := fake.NewSimpleClientset()
+	customTimeout := 10 * time.Second
+
+	detector, err := NewDetector(
+		nodeName,
+		clientset,
+		WithTimeout(customTimeout),
+		WithMetrics(false),
+	)
+	if err != nil {
+		t.Fatalf("NewDetector() failed: %v", err)
+	}
+
+	if detector.detectionTimeout != customTimeout {
+		t.Errorf("WithTimeout() = %v, want %v", detector.detectionTimeout, customTimeout)
+	}
+	if detector.enableMetrics {
+		t.Error("WithMetrics(false) should disable metrics")
+	}
+}
+
+func TestNewDetector_InvalidNodeName(t *testing.T) {
+	invalidNames := []string{
+		"",
+		"Node_With_Underscores",
+		"node@with@special",
+		"UPPERCASE",
+		strings.Repeat("a", 254), // Too long
+	}
+
+	for _, name := range invalidNames {
+		t.Run(name, func(t *testing.T) {
+			_, err := NewDetector(name, nil)
+			if err == nil {
+				t.Errorf("NewDetector(%q) should return error for invalid name", name)
+			}
+		})
+	}
+}
+
+func TestNewDetector_ValidNodeName(t *testing.T) {
+	validNames := []string{
+		"test-node",
+		"node-123",
+		"my.node.example.com",
+		"a",
+		strings.Repeat("a", 253), // Max length
+	}
+
+	for _, name := range validNames {
+		t.Run(name, func(t *testing.T) {
+			detector, err := NewDetector(name, nil, WithMetrics(false))
+			if err != nil {
+				t.Errorf("NewDetector(%q) unexpected error: %v", name, err)
+			}
+			if detector == nil {
+				t.Errorf("NewDetector(%q) returned nil", name)
+			}
+		})
+	}
+}
+
+func TestDetector_ContextCancellation(t *testing.T) {
+	detector, err := NewDetector("test-node", nil, WithMetrics(false))
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
+	}
+
+	// Create already-cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = detector.IsKataEnabled(ctx)
+	if err == nil {
+		t.Error("IsKataEnabled() should return error for cancelled context")
+	}
+	if err != context.Canceled {
+		t.Errorf("IsKataEnabled() error = %v, want %v", err, context.Canceled)
+	}
+}
+
+func TestCachedDetector(t *testing.T) {
+	// Create a node without kata
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+		Status: corev1.NodeStatus{
+			NodeInfo: corev1.NodeSystemInfo{
+				ContainerRuntimeVersion: "containerd://1.6.2",
+			},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(node)
+	detector, err := NewDetector("test-node", clientset, WithMetrics(false))
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
+	}
+
+	cached := NewCachedDetector(detector, 1*time.Second)
+
+	// First call should perform detection
+	result1, err := cached.IsKataEnabled(context.Background())
+	if err != nil {
+		t.Fatalf("First call failed: %v", err)
+	}
+
+	// Second call should return cached result
+	result2, err := cached.IsKataEnabled(context.Background())
+	if err != nil {
+		t.Fatalf("Second call failed: %v", err)
+	}
+
+	if result1.IsKata != result2.IsKata {
+		t.Error("Cached result differs from original")
+	}
+
+	// Invalidate cache
+	cached.InvalidateCache()
+
+	// Should perform detection again
+	result3, err := cached.IsKataEnabled(context.Background())
+	if err != nil {
+		t.Fatalf("Third call failed: %v", err)
+	}
+
+	if result1.IsKata != result3.IsKata {
+		t.Error("Result after invalidation differs")
+	}
+}
+
+func TestCachedDetector_Expiration(t *testing.T) {
+	// Create a node without kata
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+		Status: corev1.NodeStatus{
+			NodeInfo: corev1.NodeSystemInfo{
+				ContainerRuntimeVersion: "containerd://1.6.2",
+			},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(node)
+	detector, err := NewDetector("test-node", clientset, WithMetrics(false))
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
+	}
+
+	// Very short TTL for testing
+	cached := NewCachedDetector(detector, 10*time.Millisecond)
+
+	// First call
+	_, err = cached.IsKataEnabled(context.Background())
+	if err != nil {
+		t.Fatalf("First call failed: %v", err)
+	}
+
+	// Wait for cache to expire
+	time.Sleep(20 * time.Millisecond)
+
+	// Should perform detection again (cache expired)
+	_, err = cached.IsKataEnabled(context.Background())
+	if err != nil {
+		t.Fatalf("Second call failed: %v", err)
+	}
+}
+
+func TestDetector_DetectionResult(t *testing.T) {
+	// Create a node without kata
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+		Status: corev1.NodeStatus{
+			NodeInfo: corev1.NodeSystemInfo{
+				ContainerRuntimeVersion: "containerd://1.6.2",
+			},
+		},
+	}
+
+	clientset := fake.NewSimpleClientset(node)
+	detector, err := NewDetector("test-node", clientset, WithMetrics(false))
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
+	}
+
+	result, err := detector.IsKataEnabled(context.Background())
+	if err != nil {
+		t.Fatalf("Detection failed: %v", err)
+	}
+
+	// Check result structure
+	if result == nil {
+		t.Fatal("Result should not be nil")
+	}
+
+	// Should have attempted API detection methods
+	if len(result.AttemptedMethods) == 0 {
+		t.Error("No detection methods were attempted")
+	}
+
+	// Method should be set appropriately
+	if result.IsKata && result.Method == DetectionMethodNone {
+		t.Error("Kata detected but method is 'none'")
+	}
+}
+
+func TestDetector_RuntimeClassCaching(t *testing.T) {
+	// Create a RuntimeClass with kata handler
+	rc := &nodev1.RuntimeClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "kata-qemu",
+		},
+		Handler: "kata-qemu",
+	}
+
+	clientset := fake.NewSimpleClientset(rc)
+	detector, err := NewDetector("test-node", clientset,
+		WithMetrics(false),
+		WithRuntimeClassCacheTTL(100*time.Millisecond))
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
+	}
+
+	// First call should query API
+	start := time.Now()
+	isKata1, err := detector.detectViaRuntimeClass(context.Background())
+	duration1 := time.Since(start)
+	if err != nil {
+		t.Fatalf("First detection failed: %v", err)
+	}
+	if !isKata1 {
+		t.Error("Expected Kata to be detected")
+	}
+
+	// Second call should use cache (much faster)
+	start = time.Now()
+	isKata2, err := detector.detectViaRuntimeClass(context.Background())
+	duration2 := time.Since(start)
+	if err != nil {
+		t.Fatalf("Second detection failed: %v", err)
+	}
+	if !isKata2 {
+		t.Error("Expected Kata to be detected from cache")
+	}
+
+	// Cache should be faster (though in tests both are fast due to fake client)
+	t.Logf("First call: %v, Second call (cached): %v", duration1, duration2)
+
+	// Wait for cache to expire
+	time.Sleep(150 * time.Millisecond)
+
+	// Third call should query API again
+	isKata3, err := detector.detectViaRuntimeClass(context.Background())
+	if err != nil {
+		t.Fatalf("Third detection failed: %v", err)
+	}
+	if !isKata3 {
+		t.Error("Expected Kata to be detected after cache expiry")
+	}
+}
+
+func TestDetector_WithRuntimeClassCacheTTL(t *testing.T) {
+	clientset := fake.NewSimpleClientset()
+	customTTL := 1 * time.Hour
+
+	detector, err := NewDetector("test-node", clientset,
+		WithMetrics(false),
+		WithRuntimeClassCacheTTL(customTTL))
+	if err != nil {
+		t.Fatalf("Failed to create detector: %v", err)
+	}
+
+	if detector.rcCache.ttl != customTTL {
+		t.Errorf("Expected cache TTL %v, got %v", customTTL, detector.rcCache.ttl)
 	}
 }

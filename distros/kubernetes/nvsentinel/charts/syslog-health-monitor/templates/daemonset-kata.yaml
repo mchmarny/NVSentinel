@@ -14,7 +14,7 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: {{ include "syslog-health-monitor.fullname" . }}
+  name: {{ include "syslog-health-monitor.fullname" . }}-kata
   labels:
     {{- include "syslog-health-monitor.labels" . | nindent 4 }}
 spec:
@@ -27,6 +27,7 @@ spec:
   selector:
     matchLabels:
       {{- include "syslog-health-monitor.selectorLabels" . | nindent 6 }}
+      nvsentinel.dgxc.nvidia.com/kata: "true"
   template:
     metadata:
       {{- with (.Values.global.podAnnotations | default .Values.podAnnotations) }}
@@ -35,6 +36,7 @@ spec:
       {{- end }}
       labels:
         {{- include "syslog-health-monitor.selectorLabels" . | nindent 8 }}
+        nvsentinel.dgxc.nvidia.com/kata: "true"
     spec:
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
@@ -94,8 +96,7 @@ spec:
               mountPath: /var/run/
             - name: syslog-state-vol
               mountPath: /var/run/syslog_health_monitor
-            {{- if .Values.global.kata.enabled }}
-            # Kata mode: Mount systemd journal and TLS certificates
+            # Kata mode: Mount systemd journal for accessing host logs
             - name: host-journal
               mountPath: /nvsentinel/var/log/journal
               readOnly: true
@@ -105,12 +106,6 @@ spec:
             - name: host-machine-id
               mountPath: /etc/machine-id
               readOnly: true
-            {{- else }}
-            # Regular mode: Mount var/log directly
-            - name: var-log-vol
-              mountPath: /nvsentinel/var/log
-              readOnly: true
-            {{- end }}
             - name: proc-vol
               mountPath: /nvsentinel/proc
               readOnly: true
@@ -148,8 +143,7 @@ spec:
           hostPath:
             path: /var/run/syslog_health_monitor
             type: DirectoryOrCreate
-        {{- if .Values.global.kata.enabled }}
-        # Kata mode: Systemd journal volumes and TLS certificates
+        # Kata mode: Systemd journal volumes for host log access
         - name: host-journal
           hostPath:
             path: /var/log/journal
@@ -162,13 +156,6 @@ spec:
           hostPath:
             path: /etc/machine-id
             type: File
-        {{- else }}
-        # Regular mode: Direct var/log mount
-        - name: var-log-vol
-          hostPath:
-            path: /var/log
-            type: Directory
-        {{- end }}
         - name: sys-vol
           hostPath:
             path: /sys
@@ -177,9 +164,9 @@ spec:
           hostPath:
             path: /proc
             type: Directory
-
       nodeSelector:
         nvsentinel.dgxc.nvidia.com/driver.installed: "true"
+        nvsentinel.dgxc.nvidia.com/kata.enabled: "true"
         {{- with (.Values.global.nodeSelector | default .Values.nodeSelector) }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

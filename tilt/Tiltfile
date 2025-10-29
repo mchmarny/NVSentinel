@@ -65,13 +65,25 @@ helm_resource(
 namespace_create('gpu-operator')
 namespace_create('nvsentinel')
 
+# Create regular (non-Kata) nodes
+# Split nodes: 75% regular, 25% Kata for testing
+num_regular_nodes = int(num_gpu_nodes * 0.75)
+num_kata_nodes = num_gpu_nodes - num_regular_nodes
+
 kwok_node_template = str(read_file('./kwok-node-template.yaml'))
-for i in range(num_gpu_nodes):
+for i in range(num_regular_nodes):
     node_yaml = kwok_node_template.replace('PLACEHOLDER', str(i))
+    k8s_yaml(blob(node_yaml))
+
+# Create Kata-enabled nodes for testing
+kwok_kata_node_template = str(read_file('./kwok-kata-node-template.yaml'))
+for i in range(num_kata_nodes):
+    node_yaml = kwok_kata_node_template.replace('PLACEHOLDER', str(i))
     k8s_yaml(blob(node_yaml))
 
 k8s_yaml('./nvidia-driver-daemonset.yaml')
 k8s_yaml('./nvidia-dcgm-daemonset.yaml')
+k8s_yaml('./kata-runtimeclass.yaml')
 
 include('../fault-quarantine-module/Tiltfile')
 include('../fault-remediation-module/Tiltfile')
@@ -125,10 +137,14 @@ k8s_resource(
     port_forwards='9090:9090',
 )
 
-kwok_node_names = ['kwok-node-' + str(i) + ':node' for i in range(num_gpu_nodes)]
+# Group all KWOK nodes (regular + kata) for resource management
+kwok_regular_node_names = ['kwok-node-' + str(i) + ':node' for i in range(num_regular_nodes)]
+kwok_kata_node_names = ['kwok-kata-node-' + str(i) + ':node' for i in range(num_kata_nodes)]
+kwok_all_node_names = kwok_regular_node_names + kwok_kata_node_names
+
 k8s_resource(
     new_name='kwok-fake-nodes',
-    objects=kwok_node_names,
+    objects=kwok_all_node_names,
     resource_deps=['kwok', 'nvsentinel-platform-connector', 'nvsentinel-fault-quarantine', 'nvsentinel-fault-remediation', 
         'nvsentinel-labeler', 'nvsentinel-node-drainer', 'nvsentinel-mongodb', 'simple-health-client'
     ], 
