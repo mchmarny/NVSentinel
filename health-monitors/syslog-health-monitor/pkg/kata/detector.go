@@ -51,6 +51,7 @@ const (
 
 // DetectionResult provides detailed information about the detection attempt
 type DetectionResult struct {
+	mu               sync.Mutex
 	IsKata           bool
 	Method           DetectionMethod
 	AttemptedMethods []DetectionMethod
@@ -234,6 +235,7 @@ func (d *Detector) runConcurrentDetection(
 	// Wait for results
 	go func() {
 		_ = g.Wait()
+
 		close(resultChan)
 	}()
 
@@ -250,7 +252,10 @@ func (d *Detector) launchNodeMetadataDetection(
 ) {
 	g.Go(func() error {
 		method := DetectionMethodKubernetesAPI
+
+		result.mu.Lock()
 		result.AttemptedMethods = append(result.AttemptedMethods, method)
+		result.mu.Unlock()
 
 		start := time.Now()
 		isKata := d.checkNodeMetadata(node)
@@ -286,7 +291,10 @@ func (d *Detector) launchRuntimeClassDetection(
 ) {
 	g.Go(func() error {
 		method := DetectionMethodRuntimeClass
+
+		result.mu.Lock()
 		result.AttemptedMethods = append(result.AttemptedMethods, method)
+		result.mu.Unlock()
 
 		start := time.Now()
 		isKata, err := d.detectViaRuntimeClass(gctx)
@@ -306,7 +314,10 @@ func (d *Detector) launchRuntimeClassDetection(
 		}
 
 		if err != nil {
+			result.mu.Lock()
 			result.Errors = append(result.Errors, fmt.Errorf("runtime class detection: %w", err))
+			result.mu.Unlock()
+
 			slog.Warn("RuntimeClass-based Kata detection failed", "error", err)
 
 			return nil
@@ -339,7 +350,9 @@ func (d *Detector) waitForDetectionResult(
 			method = m
 
 			result.IsKata = true
+
 			result.Method = method
+
 			cancel()
 		}
 	case <-ctx.Done():
