@@ -157,19 +157,26 @@ func TestKataTopology(t *testing.T) {
 				}
 
 				// Verify the correct DaemonSet variant is scheduled based on kata.enabled
+				nodeValidated := false
 				for _, pod := range syslogPods {
 					podKataLabel, hasPodLabel := pod.Labels["nvsentinel.dgxc.nvidia.com/kata"]
 
 					if kataEnabled == "true" {
-						kataNodeCount++
 						assert.True(t, hasPodLabel, "Kata node %s has syslog pod without kata label", nodeName)
 						assert.Equal(t, "true", podKataLabel, "Kata node %s has syslog pod with wrong kata label: %s", nodeName, podKataLabel)
-						t.Logf("✓ Kata node %s correctly has kata syslog DaemonSet pod", nodeName)
+						if !nodeValidated {
+							kataNodeCount++
+							nodeValidated = true
+							t.Logf("✓ Kata node %s correctly has kata syslog DaemonSet pod", nodeName)
+						}
 					} else {
-						regularNodeCount++
 						assert.True(t, hasPodLabel, "Regular node %s has syslog pod without kata label", nodeName)
 						assert.Equal(t, "false", podKataLabel, "Regular node %s has syslog pod with wrong kata label: %s", nodeName, podKataLabel)
-						t.Logf("✓ Regular node %s correctly has regular syslog DaemonSet pod", nodeName)
+						if !nodeValidated {
+							regularNodeCount++
+							nodeValidated = true
+							t.Logf("✓ Regular node %s correctly has regular syslog DaemonSet pod", nodeName)
+						}
 					}
 				}
 

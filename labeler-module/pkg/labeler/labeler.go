@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/nvidia/nvsentinel/health-monitors/syslog-health-monitor/pkg/kata"
@@ -60,6 +61,8 @@ type Labeler struct {
 	ctx            context.Context
 	dcgmAppLabel   string
 	driverAppLabel string
+	kataDetectors  map[string]*kata.CachedDetector
+	kataDetectorMu sync.RWMutex
 }
 
 // NewLabeler creates a new Labeler instance
@@ -115,6 +118,7 @@ func NewLabeler(clientset kubernetes.Interface, resyncPeriod time.Duration,
 		ctx:            context.Background(),
 		dcgmAppLabel:   dcgmApp,
 		driverAppLabel: driverApp,
+		kataDetectors:  make(map[string]*kata.CachedDetector),
 	}
 
 	_, err = l.informer.AddEventHandler(cache.FilteringResourceEventHandler{
@@ -245,14 +249,11 @@ func (l *Labeler) getDriverLabelForNode(nodeName string) (string, error) {
 // getKataLabelForNode detects if Kata is enabled on the specified node
 // Returns "true" if Kata is enabled, "false" if not, or error if detection fails
 func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
-	// Create a node-specific detector with caching
-	// Use 15-minute cache TTL to balance API load with detection freshness
-	detector, err := kata.NewDetector(nodeName, l.clientset)
+	// Get or create cached detector for this node
+	cachedDetector, err := l.getOrCreateKataDetector(nodeName)
 	if err != nil {
-		return "", fmt.Errorf("failed to create kata detector for node %s: %w", nodeName, err)
+		return "", fmt.Errorf("failed to get kata detector for node %s: %w", nodeName, err)
 	}
-
-	cachedDetector := kata.NewCachedDetector(detector, 15*time.Minute)
 
 	// Detect kata with context timeout
 	ctx, cancel := context.WithTimeout(l.ctx, 5*time.Second)
@@ -268,6 +269,37 @@ func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
 	}
 
 	return LabelValueFalse, nil
+}
+
+// getOrCreateKataDetector returns the cached detector for a node, creating it if needed
+func (l *Labeler) getOrCreateKataDetector(nodeName string) (*kata.CachedDetector, error) {
+	// Fast path: check if detector exists with read lock
+	l.kataDetectorMu.RLock()
+	if detector, exists := l.kataDetectors[nodeName]; exists {
+		l.kataDetectorMu.RUnlock()
+		return detector, nil
+	}
+	l.kataDetectorMu.RUnlock()
+
+	// Slow path: create detector with write lock
+	l.kataDetectorMu.Lock()
+	defer l.kataDetectorMu.Unlock()
+
+	// Double-check after acquiring write lock
+	if detector, exists := l.kataDetectors[nodeName]; exists {
+		return detector, nil
+	}
+
+	// Create new detector with 15-minute cache TTL
+	detector, err := kata.NewDetector(nodeName, l.clientset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create kata detector: %w", err)
+	}
+
+	cachedDetector := kata.NewCachedDetector(detector, 15*time.Minute)
+	l.kataDetectors[nodeName] = cachedDetector
+
+	return cachedDetector, nil
 }
 
 // getDCGMVersionForNodeExcluding returns the expected DCGM version for a specific node,

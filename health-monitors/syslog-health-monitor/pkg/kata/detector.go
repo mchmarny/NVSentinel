@@ -426,6 +426,13 @@ func (d *Detector) checkNodeMetadata(node *corev1.Node) bool {
 	return d.checkNodeAnnotations(node)
 }
 
+// isTruthyValue checks if a string value represents a truthy state.
+// Returns true for: "true", "enabled", "1", "yes" (case-insensitive).
+func isTruthyValue(value string) bool {
+	lowerValue := strings.ToLower(value)
+	return lowerValue == "true" || lowerValue == "enabled" || lowerValue == "1" || lowerValue == "yes"
+}
+
 // checkRuntimeVersion examines container runtime version for Kata indicators.
 func (d *Detector) checkRuntimeVersion(node *corev1.Node) bool {
 	runtime := strings.ToLower(node.Status.NodeInfo.ContainerRuntimeVersion)
@@ -454,9 +461,7 @@ func (d *Detector) checkNodeLabels(node *corev1.Node) bool {
 		}
 
 		// Check if label value indicates enabled ("true", "enabled", "1", etc.)
-		lowerValue := strings.ToLower(value)
-
-		if lowerValue == "true" || lowerValue == "enabled" || lowerValue == "1" || lowerValue == "yes" {
+		if isTruthyValue(value) {
 			slog.Debug("Kata detected via node label", "label", label, "value", value)
 			return true
 		}
@@ -473,7 +478,18 @@ func (d *Detector) checkNodeAnnotations(node *corev1.Node) bool {
 	}
 
 	for _, annotation := range kataAnnotations {
-		if value, exists := node.Annotations[annotation]; exists && value != "" {
+		value, exists := node.Annotations[annotation]
+		if !exists || value == "" {
+			continue
+		}
+
+		// For kata-runtime.io/enabled, validate truthy value; for config, presence is sufficient
+		if annotation == "kata-runtime.io/enabled" {
+			if isTruthyValue(value) {
+				slog.Debug("Kata detected via node annotation", "annotation", annotation, "value", value)
+				return true
+			}
+		} else {
 			slog.Debug("Kata detected via node annotation", "annotation", annotation)
 			return true
 		}
