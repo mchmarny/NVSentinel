@@ -141,6 +141,7 @@ func NewDetectorWithTimeout(nodeName string, clientset kubernetes.Interface, tim
 			enableMetrics:    true,
 		}
 	}
+
 	return detector
 }
 
@@ -157,10 +158,8 @@ func NewDetectorWithTimeout(nodeName string, clientset kubernetes.Interface, tim
 // including which methods were tried and any errors encountered.
 func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) {
 	// Respect parent context cancellation
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	if err := d.checkContextCancellation(ctx); err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, d.detectionTimeout)
@@ -175,27 +174,69 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 
 	slog.Info("Detecting Kata Containers runtime via Kubernetes API", "node", d.nodeName)
 
-	// Require clientset for API-based detection
-	if d.clientset == nil {
-		slog.Error("Detection failed: no Kubernetes API access", "node", d.nodeName)
-		err := fmt.Errorf(
-			"kubernetes clientset required for kata detection",
-		)
-
+	// Validate prerequisites
+	if err := d.validateClientset(); err != nil {
 		return nil, err
 	}
 
-	// Optimization: Fetch node once, use for both detection methods
+	// Fetch node once for both detection methods
 	node, err := d.getNode(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node: %w", err)
 	}
 
-	// Use errgroup for concurrent detection with early exit on positive result
-	g, gctx := errgroup.WithContext(ctx)
-	resultChan := make(chan DetectionMethod, 2) // Buffer for API detection methods
+	// Run concurrent detection methods
+	if err := d.runConcurrentDetection(ctx, cancel, node, result); err != nil {
+		return nil, err
+	}
 
-	// Method 1: Kubernetes API detection (node metadata)
+	// Record final result
+	d.recordDetectionResult(result)
+
+	return result, nil
+}
+
+// checkContextCancellation checks if the parent context is already cancelled
+func (d *Detector) checkContextCancellation(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+// validateClientset ensures the Kubernetes clientset is available
+func (d *Detector) validateClientset() error {
+	if d.clientset == nil {
+		slog.Error("Detection failed: no Kubernetes API access", "node", d.nodeName)
+
+		return fmt.Errorf("kubernetes clientset required for kata detection")
+	}
+
+	return nil
+}
+
+// runConcurrentDetection runs detection methods concurrently with early exit
+func (d *Detector) runConcurrentDetection(ctx context.Context, cancel context.CancelFunc, node *corev1.Node, result *DetectionResult) error {
+	g, gctx := errgroup.WithContext(ctx)
+	resultChan := make(chan DetectionMethod, 2)
+
+	// Launch detection goroutines
+	d.launchNodeMetadataDetection(g, gctx, node, result, resultChan)
+	d.launchRuntimeClassDetection(g, gctx, result, resultChan)
+
+	// Wait for results
+	go func() {
+		_ = g.Wait()
+		close(resultChan)
+	}()
+
+	return d.waitForDetectionResult(ctx, cancel, resultChan, result)
+}
+
+// launchNodeMetadataDetection launches the node metadata detection goroutine
+func (d *Detector) launchNodeMetadataDetection(g *errgroup.Group, gctx context.Context, node *corev1.Node, result *DetectionResult, resultChan chan DetectionMethod) {
 	g.Go(func() error {
 		method := DetectionMethodKubernetesAPI
 		result.AttemptedMethods = append(result.AttemptedMethods, method)
@@ -219,8 +260,10 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 
 		return nil
 	})
+}
 
-	// Method 2: RuntimeClass detection
+// launchRuntimeClassDetection launches the RuntimeClass detection goroutine
+func (d *Detector) launchRuntimeClassDetection(g *errgroup.Group, gctx context.Context, result *DetectionResult, resultChan chan DetectionMethod) {
 	g.Go(func() error {
 		method := DetectionMethodRuntimeClass
 		result.AttemptedMethods = append(result.AttemptedMethods, method)
@@ -251,15 +294,11 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 
 		return nil
 	})
+}
 
-	// Wait for all goroutines to complete and close channel
-	go func() {
-		_ = g.Wait() // Errors already collected in result.Errors
-		close(resultChan)
-	}()
-
-	// Wait for first positive result or all to complete
-	method := DetectionMethodNone
+// waitForDetectionResult waits for the first positive result or timeout
+func (d *Detector) waitForDetectionResult(ctx context.Context, cancel context.CancelFunc, resultChan chan DetectionMethod, result *DetectionResult) error {
+	var method DetectionMethod
 
 	select {
 	case m := <-resultChan:
@@ -267,21 +306,25 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 			method = m
 			result.IsKata = true
 			result.Method = method
-			cancel() // Stop other goroutines
+			cancel()
 		}
 	case <-ctx.Done():
 		if d.enableMetrics {
 			detectionResults.WithLabelValues(d.nodeName, "timeout").Inc()
 		}
 
-		return nil, ctx.Err()
+		return ctx.Err()
 	}
 
-	// Wait for channel to close (all goroutines done)
+	// Drain remaining results
 	for range resultChan {
-		// Drain any remaining results
 	}
 
+	return nil
+}
+
+// recordDetectionResult logs and records metrics for the final detection result
+func (d *Detector) recordDetectionResult(result *DetectionResult) {
 	if d.enableMetrics {
 		detectionResults.WithLabelValues(d.nodeName, fmt.Sprintf("%t", result.IsKata)).Inc()
 	}
@@ -292,13 +335,12 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 			"attempted_methods", result.AttemptedMethods,
 			"errors", len(result.Errors))
 	}
-
-	return result, nil
 }
 
 // getNode retrieves the node object using direct API call with retry
 func (d *Detector) getNode(ctx context.Context) (*corev1.Node, error) {
 	var node *corev1.Node
+
 	retryErr := retry.OnError(
 		retry.DefaultBackoff,
 		func(err error) bool {
@@ -314,7 +356,6 @@ func (d *Detector) getNode(ctx context.Context) (*corev1.Node, error) {
 			return err
 		},
 	)
-
 	if retryErr != nil {
 		return nil, fmt.Errorf("failed to get node after retries: %w", retryErr)
 	}
@@ -424,7 +465,6 @@ func (d *Detector) detectViaRuntimeClass(ctx context.Context) (bool, error) {
 
 	for _, rc := range rcList.Items {
 		handler := strings.ToLower(rc.Handler)
-
 		if strings.Contains(handler, "kata") {
 			slog.Debug("Kata RuntimeClass detected", "name", rc.Name, "handler", rc.Handler)
 			hasKata = true
