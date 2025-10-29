@@ -59,10 +59,10 @@ Check that the labeler has set kata labels on nodes:
 
 ```bash
 # Check Kata nodes - should have kata.enabled: "true"
-kubectl get nodes -l type=kwok -o jsonpath='{range .items[?(@.metadata.name=="kwok-kata-node-0")]}{.metadata.name}{"\t"}{.metadata.labels.nvsentinel\.dgxc\.nvidia\.com/kata\.enabled}{"\n"}{end}'
+kubectl get nodes -l type=kwok,nvsentinel.dgxc.nvidia.com/kata.enabled=true -o custom-columns=NAME:.metadata.name,KATA:.metadata.labels.nvsentinel\.dgxc\.nvidia\.com/kata\.enabled
 
 # Check regular nodes - should have kata.enabled: "false"
-kubectl get nodes -l type=kwok -o jsonpath='{range .items[?(@.metadata.name=="kwok-node-0")]}{.metadata.name}{"\t"}{.metadata.labels.nvsentinel\.dgxc\.nvidia\.com/kata\.enabled}{"\n"}{end}'
+kubectl get nodes -l type=kwok,nvsentinel.dgxc.nvidia.com/kata.enabled=false -o custom-columns=NAME:.metadata.name,KATA:.metadata.labels.nvsentinel\.dgxc\.nvidia\.com/kata\.enabled
 
 # List all nodes with their kata status
 kubectl get nodes -l type=kwok -o custom-columns=NAME:.metadata.name,KATA:.metadata.labels.nvsentinel\.dgxc\.nvidia\.com/kata\.enabled
@@ -141,9 +141,10 @@ For example, `0.5` would create 50/50 split.
 
 ### DaemonSets Not Scheduling
 
-1. Check if labels are set:
+1. Check if labels are set on any Kata node:
    ```bash
-   kubectl describe node kwok-kata-node-0 | grep kata.enabled
+   # Pick any Kata node to inspect
+   kubectl get nodes -l type=kwok,nvsentinel.dgxc.nvidia.com/kata.enabled=true -o name | head -1 | xargs kubectl describe | grep kata.enabled
    ```
 
 2. Check DaemonSet selectors match:
@@ -153,9 +154,10 @@ For example, `0.5` would create 50/50 split.
 
 ### Force Relabeling
 
-Delete and recreate a node to trigger relabeling:
+Delete and recreate a node to trigger relabeling (pick any node):
 ```bash
-kubectl delete node kwok-kata-node-0
+# Example: delete a Kata node
+kubectl get nodes -l type=kwok,nvsentinel.dgxc.nvidia.com/kata.enabled=true -o name | head -1 | xargs kubectl delete
 # Tilt will recreate it
 ```
 

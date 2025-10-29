@@ -140,6 +140,9 @@ func NewDetectorWithTimeout(nodeName string, clientset kubernetes.Interface, tim
 			clientset:        clientset,
 			detectionTimeout: timeout,
 			enableMetrics:    true,
+			rcCache: &runtimeClassCache{
+				ttl: DefaultRuntimeClassCacheTTL,
+			},
 		}
 	}
 
@@ -259,7 +262,7 @@ func (d *Detector) launchNodeMetadataDetection(
 		isKata := d.checkNodeMetadata(node)
 		duration := time.Since(start)
 
-		if d.enableMetrics {
+		if d.enableMetrics && metricsEnabled {
 			detectionAttempts.WithLabelValues(d.nodeName, string(method), "true").Inc()
 			detectionDuration.WithLabelValues(
 				d.nodeName,
@@ -298,7 +301,7 @@ func (d *Detector) launchRuntimeClassDetection(
 		isKata, err := d.detectViaRuntimeClass(gctx)
 		duration := time.Since(start)
 
-		if d.enableMetrics {
+		if d.enableMetrics && metricsEnabled {
 			detectionAttempts.WithLabelValues(
 				d.nodeName,
 				string(method),
@@ -354,7 +357,7 @@ func (d *Detector) waitForDetectionResult(
 			cancel()
 		}
 	case <-ctx.Done():
-		if d.enableMetrics {
+		if d.enableMetrics && metricsEnabled {
 			detectionResults.WithLabelValues(d.nodeName, "timeout").Inc()
 		}
 
@@ -370,7 +373,7 @@ func (d *Detector) waitForDetectionResult(
 
 // recordDetectionResult logs and records metrics for the final detection result
 func (d *Detector) recordDetectionResult(result *DetectionResult) {
-	if d.enableMetrics {
+	if d.enableMetrics && metricsEnabled {
 		detectionResults.WithLabelValues(d.nodeName, fmt.Sprintf("%t", result.IsKata)).Inc()
 	}
 
@@ -483,14 +486,9 @@ func (d *Detector) checkNodeAnnotations(node *corev1.Node) bool {
 			continue
 		}
 
-		// For kata-runtime.io/enabled, validate truthy value; for config, presence is sufficient
-		if annotation == "kata-runtime.io/enabled" {
-			if isTruthyValue(value) {
-				slog.Debug("Kata detected via node annotation", "annotation", annotation, "value", value)
-				return true
-			}
-		} else {
-			slog.Debug("Kata detected via node annotation", "annotation", annotation)
+		// Validate that the annotation value indicates enabled state
+		if isTruthyValue(value) {
+			slog.Debug("Kata detected via node annotation", "annotation", annotation, "value", value)
 			return true
 		}
 	}

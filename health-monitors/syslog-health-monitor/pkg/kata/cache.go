@@ -32,7 +32,12 @@ type CachedDetector struct {
 
 // NewCachedDetector creates a cached detector wrapper with the specified TTL.
 // Typical production TTL is 5-15 minutes since runtime config changes rarely.
+// Returns nil if detector is nil.
 func NewCachedDetector(detector *Detector, ttl time.Duration) *CachedDetector {
+	if detector == nil {
+		return nil
+	}
+
 	return &CachedDetector{
 		detector: detector,
 		cacheTTL: ttl,

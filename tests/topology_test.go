@@ -123,7 +123,9 @@ func TestKataTopology(t *testing.T) {
 
 		t.Logf("Checking Kata topology on %d nodes", len(allNodes))
 
-		var kataNodeCount, regularNodeCount int
+		// Track validated nodes by type to avoid counting duplicates across Eventually retries
+		kataNodes := make(map[string]bool)
+		regularNodes := make(map[string]bool)
 
 		for _, nodeName := range allNodes {
 			require.Eventually(t, func() bool {
@@ -165,7 +167,7 @@ func TestKataTopology(t *testing.T) {
 						assert.True(t, hasPodLabel, "Kata node %s has syslog pod without kata label", nodeName)
 						assert.Equal(t, "true", podKataLabel, "Kata node %s has syslog pod with wrong kata label: %s", nodeName, podKataLabel)
 						if !nodeValidated {
-							kataNodeCount++
+							kataNodes[nodeName] = true
 							nodeValidated = true
 							t.Logf("✓ Kata node %s correctly has kata syslog DaemonSet pod", nodeName)
 						}
@@ -173,7 +175,7 @@ func TestKataTopology(t *testing.T) {
 						assert.True(t, hasPodLabel, "Regular node %s has syslog pod without kata label", nodeName)
 						assert.Equal(t, "false", podKataLabel, "Regular node %s has syslog pod with wrong kata label: %s", nodeName, podKataLabel)
 						if !nodeValidated {
-							regularNodeCount++
+							regularNodes[nodeName] = true
 							nodeValidated = true
 							t.Logf("✓ Regular node %s correctly has regular syslog DaemonSet pod", nodeName)
 						}
@@ -184,6 +186,8 @@ func TestKataTopology(t *testing.T) {
 			}, helpers.WaitTimeout, helpers.WaitInterval, "Kata topology validation failed for node %s", nodeName)
 		}
 
+		kataNodeCount := len(kataNodes)
+		regularNodeCount := len(regularNodes)
 		t.Logf("Kata topology validated: %d Kata nodes, %d regular nodes", kataNodeCount, regularNodeCount)
 
 		// Verify we have both types of nodes in the test cluster

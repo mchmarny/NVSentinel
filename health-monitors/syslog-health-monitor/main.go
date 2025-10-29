@@ -63,6 +63,8 @@ var (
 	metricsPort         = flag.String("metrics-port", "2112", "Port to expose Prometheus metrics on")
 	xidAnalyserEndpoint = flag.String("xid-analyser-endpoint", "",
 		"Endpoint to the XID analyser service.")
+	kataEnabled = flag.String("kata-enabled", "false",
+		"Indicates if this monitor is running in Kata Containers mode (set by DaemonSet variant).")
 )
 
 // ConfigFile matches the top-level structure of the YAML config file
@@ -90,7 +92,7 @@ func run() error {
 		return fmt.Errorf("NODE_NAME env not set and --node-name flag not provided, cannot run")
 	}
 
-	slog.Info("Using node name", "node", nodeName)
+	slog.Info("Configuration", "node", nodeName, "kata-enabled", *kataEnabled)
 
 	// Root context canceled on SIGINT/SIGTERM so goroutines can exit cleanly.
 	root := context.Background()

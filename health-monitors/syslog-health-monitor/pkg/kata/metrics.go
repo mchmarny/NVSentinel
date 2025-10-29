@@ -20,7 +20,22 @@ import (
 )
 
 var (
-	detectionDuration = promauto.NewHistogramVec(
+	detectionDuration *prometheus.HistogramVec
+	detectionAttempts *prometheus.CounterVec
+	detectionResults  *prometheus.CounterVec
+	metricsEnabled    bool
+)
+
+// InitMetrics initializes and registers Kata detection metrics.
+// Must be called before creating detectors if metrics are desired.
+// If not called, metric recording will be safely skipped (no-op).
+func InitMetrics(reg prometheus.Registerer, enabled bool) {
+	metricsEnabled = enabled
+	if !enabled || reg == nil {
+		return
+	}
+
+	detectionDuration = promauto.With(reg).NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "kata_detection_duration_seconds",
 			Help:    "Duration of Kata detection operations",
@@ -29,7 +44,7 @@ var (
 		[]string{"node", "method", "result"},
 	)
 
-	detectionAttempts = promauto.NewCounterVec(
+	detectionAttempts = promauto.With(reg).NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "kata_detection_attempts_total",
 			Help: "Total Kata detection attempts by method",
@@ -37,11 +52,11 @@ var (
 		[]string{"node", "method", "success"},
 	)
 
-	detectionResults = promauto.NewCounterVec(
+	detectionResults = promauto.With(reg).NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "kata_detection_results_total",
 			Help: "Total Kata detection results",
 		},
 		[]string{"node", "detected"},
 	)
-)
+}
