@@ -31,6 +31,7 @@ var (
 // If not called, metric recording will be safely skipped (no-op).
 func InitMetrics(reg prometheus.Registerer, enabled bool) {
 	metricsEnabled = enabled
+
 	if !enabled || reg == nil {
 		return
 	}
