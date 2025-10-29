@@ -75,10 +75,9 @@ for i in range(num_gpu_nodes):
 # Create separate Kata test nodes (in addition to regular nodes)
 # These are named differently (kwok-kata-test-node-*) to avoid conflicts
 # Set NUM_KATA_TEST_NODES=0 to disable kata testing
-kwok_kata_node_template = str(read_file('./kwok-kata-node-template.yaml'))
+kwok_kata_test_node_template = str(read_file('./kwok-kata-test-node-template.yaml'))
 for i in range(num_kata_test_nodes):
-    # Use "kata-test-node" naming to distinguish from regular GPU nodes
-    node_yaml = kwok_kata_node_template.replace('PLACEHOLDER', 'test-' + str(i))
+    node_yaml = kwok_kata_test_node_template.replace('PLACEHOLDER', str(i))
     k8s_yaml(blob(node_yaml))
 
 k8s_yaml('./nvidia-driver-daemonset.yaml')

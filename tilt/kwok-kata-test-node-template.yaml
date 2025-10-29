@@ -23,7 +23,7 @@ metadata:
   labels:
     beta.kubernetes.io/arch: amd64
     beta.kubernetes.io/os: linux
-    kubernetes.io/hostname: kwok-kata-node-PLACEHOLDER
+    kubernetes.io/hostname: kwok-kata-test-node-PLACEHOLDER
     kubernetes.io/os: linux
     kubernetes.io/role: agent
     node-role.kubernetes.io/agent: ""
@@ -33,7 +33,7 @@ metadata:
     type: kwok
     # Kata label - another detection method (will be set by labeler, but pre-setting for visibility)
     katacontainers.io/kata-runtime: "true"
-  name: kwok-kata-node-PLACEHOLDER
+  name: kwok-kata-test-node-PLACEHOLDER
 spec:
   taints:
   - effect: NoSchedule

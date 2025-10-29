@@ -65,7 +65,7 @@ Create the name of the service account to use
 DaemonSet template that can be customized for kata or regular mode.
 Usage: include "syslog-health-monitor.daemonset" (dict "root" . "kataMode" true)
 */}}
-{{- define "syslog-health-monitor.daemonset" -}}
+{{- define "syslog-health-monitor.daemonset" }}
 {{- $root := .root -}}
 {{- $kataMode := .kataMode -}}
 {{- $suffix := ternary "kata" "regular" $kataMode -}}
