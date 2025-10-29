@@ -21,7 +21,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	nodev1 "k8s.io/api/node/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -497,76 +496,5 @@ func TestDetector_DetectionResult(t *testing.T) {
 	// Method should be set appropriately
 	if result.IsKata && result.Method == DetectionMethodNone {
 		t.Error("Kata detected but method is 'none'")
-	}
-}
-
-func TestDetector_RuntimeClassCaching(t *testing.T) {
-	// RuntimeClass with kata handler
-	rc := &nodev1.RuntimeClass{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "kata-qemu",
-		},
-		Handler: "kata-qemu",
-	}
-
-	clientset := fake.NewSimpleClientset(rc)
-	detector, err := NewDetector("test-node", clientset,
-		WithMetrics(false),
-		WithRuntimeClassCacheTTL(100*time.Millisecond))
-	if err != nil {
-		t.Fatalf("Failed to create detector: %v", err)
-	}
-
-	// First call should query API
-	start := time.Now()
-	isKata1, err := detector.detectViaRuntimeClass(context.Background())
-	duration1 := time.Since(start)
-	if err != nil {
-		t.Fatalf("First detection failed: %v", err)
-	}
-	if !isKata1 {
-		t.Error("Expected Kata to be detected")
-	}
-
-	// Second call uses cache
-	start = time.Now()
-	isKata2, err := detector.detectViaRuntimeClass(context.Background())
-	duration2 := time.Since(start)
-	if err != nil {
-		t.Fatalf("Second detection failed: %v", err)
-	}
-	if !isKata2 {
-		t.Error("Expected Kata to be detected from cache")
-	}
-
-	// Cache faster in production (fake client makes both fast in tests)
-	t.Logf("First call: %v, Second call (cached): %v", duration1, duration2)
-
-	// Wait for cache to expire
-	time.Sleep(150 * time.Millisecond)
-
-	// Third call should query API again
-	isKata3, err := detector.detectViaRuntimeClass(context.Background())
-	if err != nil {
-		t.Fatalf("Third detection failed: %v", err)
-	}
-	if !isKata3 {
-		t.Error("Expected Kata to be detected after cache expiry")
-	}
-}
-
-func TestDetector_WithRuntimeClassCacheTTL(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
-	customTTL := 1 * time.Hour
-
-	detector, err := NewDetector("test-node", clientset,
-		WithMetrics(false),
-		WithRuntimeClassCacheTTL(customTTL))
-	if err != nil {
-		t.Fatalf("Failed to create detector: %v", err)
-	}
-
-	if detector.rcCache.ttl != customTTL {
-		t.Errorf("Expected cache TTL %v, got %v", customTTL, detector.rcCache.ttl)
 	}
 }

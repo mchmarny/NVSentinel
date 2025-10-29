@@ -5,14 +5,18 @@ This guide explains how to test Kata Containers detection with mock nodes in you
 ## Overview
 
 The Tilt setup creates two types of KWOK (fake) nodes:
-- **Regular nodes** (75% of total): Standard container runtime, kata detection returns `false`
-- **Kata nodes** (25% of total): Kata-enabled runtime, kata detection returns `true`
+- **Regular GPU nodes** (`NUM_GPU_NODES`): Standard container runtime, kata detection returns `false`
+- **Kata test nodes** (`NUM_KATA_TEST_NODES`): Separate kata-enabled nodes for testing
+
+This approach ensures kata testing doesn't interfere with other tests that expect all GPU nodes to be regular nodes.
 
 ## Node Distribution
 
-With the default `NUM_GPU_NODES=50`:
-- **37 regular nodes**: `kwok-node-0` through `kwok-node-36`
-- **13 Kata nodes**: `kwok-kata-node-0` through `kwok-kata-node-12`
+With the default environment variables:
+- **50 regular GPU nodes**: `kwok-node-0` through `kwok-node-49` (controlled by `NUM_GPU_NODES=50`)
+- **5 kata test nodes**: `kwok-kata-test-node-0` through `kwok-kata-test-node-4` (controlled by `NUM_KATA_TEST_NODES=5`)
+
+Total: 55 nodes (50 regular + 5 kata test nodes)
 
 ## Kata Detection Methods
 
@@ -33,8 +37,9 @@ The mock Kata nodes have all detection signals configured:
    katacontainers.io/kata-runtime: "true"
    ```
 
-4. **RuntimeClass Detection**:
-   - `kata-qemu`, `kata-clh`, `kata-fc` RuntimeClasses are created
+**Note**: RuntimeClass resources are not used for detection because they are cluster-wide 
+and don't indicate which specific nodes support the runtime. Detection is based solely on 
+node metadata (runtime version, labels, annotations).
 
 ## How It Works
 
@@ -44,6 +49,18 @@ The mock Kata nodes have all detection signals configured:
 4. **DaemonSets schedule accordingly**:
    - `syslog-health-monitor-kata` → Kata nodes (with systemd journal mounts)
    - `syslog-health-monitor-regular` → Regular nodes (with /var/log mounts)
+
+## Environment Variables
+
+Control the number of nodes via environment variables:
+
+```bash
+# Set number of regular GPU nodes (default: 50)
+export NUM_GPU_NODES=50
+
+# Set number of kata test nodes (default: 5, set to 0 to disable kata testing)
+export NUM_KATA_TEST_NODES=5
+```
 
 ## Testing in Tilt
 
@@ -58,26 +75,24 @@ tilt up
 Check that the labeler has set kata labels on nodes:
 
 ```bash
-# Check Kata nodes - should have kata.enabled: "true"
+# Check kata test nodes - should have kata.enabled: "true"
 kubectl get nodes -l type=kwok,nvsentinel.dgxc.nvidia.com/kata.enabled=true -o custom-columns=NAME:.metadata.name,KATA:.metadata.labels.nvsentinel\.dgxc\.nvidia\.com/kata\.enabled
 
-# Check regular nodes - should have kata.enabled: "false"
+# Check regular GPU nodes - should have kata.enabled: "false"
 kubectl get nodes -l type=kwok,nvsentinel.dgxc.nvidia.com/kata.enabled=false -o custom-columns=NAME:.metadata.name,KATA:.metadata.labels.nvsentinel\.dgxc\.nvidia\.com/kata\.enabled
 
-# List all nodes with their kata status
+# List all KWOK nodes with their kata status
 kubectl get nodes -l type=kwok -o custom-columns=NAME:.metadata.name,KATA:.metadata.labels.nvsentinel\.dgxc\.nvidia\.com/kata\.enabled
 ```
 
 ### Verify DaemonSet Scheduling
 
-Check that the correct DaemonSet pods are scheduled on the correct nodes:
-
 ```bash
-# Kata DaemonSet should be on kata nodes
-kubectl get pods -n nvsentinel -l nvsentinel.dgxc.nvidia.com/kata=true -o wide
+# Check kata daemonset - should run on kata test nodes (5 pods by default)
+kubectl get pods -n nvsentinel -l app.kubernetes.io/name=syslog-health-monitor-kata -o wide
 
-# Regular DaemonSet should be on regular nodes
-kubectl get pods -n nvsentinel -l nvsentinel.dgxc.nvidia.com/kata=false -o wide
+# Check regular daemonset - should run on regular GPU nodes (50 pods by default)
+kubectl get pods -n nvsentinel -l app.kubernetes.io/name=syslog-health-monitor-regular -o wide
 ```
 
 ### Check Labeler Logs
@@ -94,31 +109,29 @@ INFO Setting Kata enabled label on node node=kwok-kata-node-0 kata=true
 INFO Setting Kata enabled label on node node=kwok-node-0 kata=false
 ```
 
-## Customizing Node Distribution
+## Adjusting Node Counts
 
-You can adjust the number and ratio of nodes:
+Change node counts via environment variables before starting Tilt:
 
-### Change Total Node Count
 ```bash
-NUM_GPU_NODES=100 tilt up
+# More GPU nodes for scale testing
+export NUM_GPU_NODES=100
+
+# More kata test nodes for kata-specific testing
+export NUM_KATA_TEST_NODES=10
+
+# Disable kata testing entirely (useful for tests that don't need kata)
+export NUM_KATA_TEST_NODES=0
+
+tilt up
 ```
-This creates 75 regular nodes + 25 Kata nodes.
-
-### Modify the Ratio
-
-Edit `tilt/Tiltfile` and change this line:
-```python
-num_regular_nodes = int(num_gpu_nodes * 0.75)  # Change 0.75 to desired ratio
-```
-
-For example, `0.5` would create 50/50 split.
 
 ## Files
 
-- **`kwok-node-template.yaml`**: Template for regular nodes
-- **`kwok-kata-node-template.yaml`**: Template for Kata-enabled nodes  
-- **`kata-runtimeclass.yaml`**: RuntimeClass resources for Kata detection
-- **`Tiltfile`**: Creates nodes with configurable ratio
+- **`kwok-node-template.yaml`**: Template for regular GPU nodes
+- **`kwok-kata-node-template.yaml`**: Template for kata test nodes  
+- **`kata-runtimeclass.yaml`**: RuntimeClass resources (for pod scheduling, not detection)
+- **`Tiltfile`**: Creates nodes with configurable counts via environment variables
 
 ## Troubleshooting
 
@@ -154,10 +167,14 @@ For example, `0.5` would create 50/50 split.
 
 ### Force Relabeling
 
-Delete and recreate a node to trigger relabeling (pick any node):
+Delete and recreate a node to trigger relabeling:
 ```bash
-# Example: delete a Kata node
-kubectl get nodes -l type=kwok,nvsentinel.dgxc.nvidia.com/kata.enabled=true -o name | head -1 | xargs kubectl delete
+# Example: delete a kata test node
+kubectl delete node kwok-kata-test-node-0
+# Tilt will recreate it
+
+# Example: delete a regular GPU node
+kubectl delete node kwok-node-0
 # Tilt will recreate it
 ```
 
@@ -165,7 +182,7 @@ kubectl get nodes -l type=kwok,nvsentinel.dgxc.nvidia.com/kata.enabled=true -o n
 
 With this setup, you can test:
 
-1. ✅ **Kata detection** via multiple methods (runtime version, labels, annotations, RuntimeClass)
+1. ✅ **Kata detection** via node metadata (runtime version, labels, annotations)
 2. ✅ **Automatic node labeling** by the labeler-module
 3. ✅ **DaemonSet scheduling** to correct node types
 4. ✅ **Different volume mounts** (systemd journal vs /var/log)

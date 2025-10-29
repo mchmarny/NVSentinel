@@ -19,10 +19,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"sync"
 	"time"
 
-	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,10 +32,6 @@ import (
 const (
 	// DefaultDetectionTimeout is the default timeout for detection operations
 	DefaultDetectionTimeout = 5 * time.Second
-
-	// DefaultRuntimeClassCacheTTL is the default TTL for RuntimeClass cache
-	// RuntimeClasses rarely change after cluster setup, so a longer cache is reasonable
-	DefaultRuntimeClassCacheTTL = 10 * time.Minute
 )
 
 // DetectionMethod represents the method used for Kata detection
@@ -45,26 +39,15 @@ type DetectionMethod string
 
 const (
 	DetectionMethodKubernetesAPI DetectionMethod = "kubernetes-api"
-	DetectionMethodRuntimeClass  DetectionMethod = "runtime-class"
 	DetectionMethodNone          DetectionMethod = "none"
 )
 
 // DetectionResult provides detailed information about the detection attempt
 type DetectionResult struct {
-	mu               sync.Mutex
 	IsKata           bool
 	Method           DetectionMethod
 	AttemptedMethods []DetectionMethod
 	Errors           []error
-}
-
-// runtimeClassCache provides TTL-based caching for RuntimeClass detection.
-// Reduces API server load in large clusters (2000+ nodes).
-type runtimeClassCache struct {
-	mu          sync.RWMutex
-	hasKata     bool
-	lastChecked time.Time
-	ttl         time.Duration
 }
 
 // Detector provides methods to detect if the current node is running Kata Containers
@@ -73,7 +56,6 @@ type Detector struct {
 	clientset        kubernetes.Interface
 	detectionTimeout time.Duration
 	enableMetrics    bool
-	rcCache          *runtimeClassCache
 }
 
 // DetectorOption is a functional option for configuring the Detector
@@ -93,14 +75,6 @@ func WithMetrics(enabled bool) DetectorOption {
 	}
 }
 
-// WithRuntimeClassCacheTTL sets custom TTL for RuntimeClass cache.
-// Default is 10 minutes. Longer TTL reduces API load but delays change detection.
-func WithRuntimeClassCacheTTL(ttl time.Duration) DetectorOption {
-	return func(d *Detector) {
-		d.rcCache.ttl = ttl
-	}
-}
-
 // NewDetector creates a Kata runtime detector with default configuration.
 // Returns error if node name violates DNS-1123 subdomain rules.
 func NewDetector(nodeName string, clientset kubernetes.Interface, opts ...DetectorOption) (*Detector, error) {
@@ -114,9 +88,6 @@ func NewDetector(nodeName string, clientset kubernetes.Interface, opts ...Detect
 		clientset:        clientset,
 		detectionTimeout: DefaultDetectionTimeout,
 		enableMetrics:    true, // Enable by default
-		rcCache: &runtimeClassCache{
-			ttl: DefaultRuntimeClassCacheTTL,
-		},
 	}
 
 	// Apply options
@@ -140,9 +111,6 @@ func NewDetectorWithTimeout(nodeName string, clientset kubernetes.Interface, tim
 			clientset:        clientset,
 			detectionTimeout: timeout,
 			enableMetrics:    true,
-			rcCache: &runtimeClassCache{
-				ttl: DefaultRuntimeClassCacheTTL,
-			},
 		}
 	}
 
@@ -150,12 +118,16 @@ func NewDetectorWithTimeout(nodeName string, clientset kubernetes.Interface, tim
 }
 
 // IsKataEnabled determines if Kata Containers runtime is enabled on this node.
-// Uses concurrent Kubernetes API detection:
-// 1. Node status (ContainerRuntimeVersion, labels, annotations)
-// 2. RuntimeClass handlers
+// Checks node metadata including:
+// 1. Container runtime version
+// 2. Node labels
+// 3. Node annotations
 //
 // Filesystem detection intentionally excluded - binaries/directories persist after
 // Kata is disabled, causing false positives. Only API reflects active config.
+//
+// RuntimeClass detection is not used because RuntimeClass resources are cluster-wide
+// and don't indicate which specific nodes support the runtime handler.
 //
 // Returns DetectionResult with attempted methods and any errors encountered.
 func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) {
@@ -170,8 +142,8 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 	result := &DetectionResult{
 		IsKata:           false,
 		Method:           DetectionMethodNone,
-		AttemptedMethods: make([]DetectionMethod, 0, 2),
-		Errors:           make([]error, 0, 2),
+		AttemptedMethods: make([]DetectionMethod, 0, 1),
+		Errors:           make([]error, 0, 1),
 	}
 
 	slog.Info("Detecting Kata Containers runtime via Kubernetes API", "node", d.nodeName)
@@ -181,15 +153,34 @@ func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) 
 		return nil, err
 	}
 
-	// Fetch node once for both detection methods
+	// Fetch node for metadata detection
 	node, err := d.getNode(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get node: %w", err)
 	}
 
-	// Run concurrent detection methods
-	if err := d.runConcurrentDetection(ctx, cancel, node, result); err != nil {
-		return nil, err
+	// Check node metadata (runtime version, labels, annotations)
+	result.AttemptedMethods = append(result.AttemptedMethods, DetectionMethodKubernetesAPI)
+	start := time.Now()
+	if d.checkNodeMetadata(node) {
+		result.IsKata = true
+		result.Method = DetectionMethodKubernetesAPI
+		duration := time.Since(start)
+
+		if d.enableMetrics && metricsEnabled {
+			detectionAttempts.WithLabelValues(d.nodeName, string(DetectionMethodKubernetesAPI), "true").Inc()
+			detectionDuration.WithLabelValues(d.nodeName, string(DetectionMethodKubernetesAPI), "true").Observe(duration.Seconds())
+		}
+
+		slog.Info("Kata Containers detected via Kubernetes API", "node", d.nodeName)
+		d.recordDetectionResult(result)
+		return result, nil
+	}
+
+	if d.enableMetrics && metricsEnabled {
+		duration := time.Since(start)
+		detectionAttempts.WithLabelValues(d.nodeName, string(DetectionMethodKubernetesAPI), "true").Inc()
+		detectionDuration.WithLabelValues(d.nodeName, string(DetectionMethodKubernetesAPI), "false").Observe(duration.Seconds())
 	}
 
 	// Record final result
@@ -214,158 +205,6 @@ func (d *Detector) validateClientset() error {
 		slog.Error("Detection failed: no Kubernetes API access", "node", d.nodeName)
 
 		return fmt.Errorf("kubernetes clientset required for kata detection")
-	}
-
-	return nil
-}
-
-// runConcurrentDetection runs detection methods concurrently with early exit
-func (d *Detector) runConcurrentDetection(
-	ctx context.Context,
-	cancel context.CancelFunc,
-	node *corev1.Node,
-	result *DetectionResult,
-) error {
-	g, gctx := errgroup.WithContext(ctx)
-	resultChan := make(chan DetectionMethod, 2)
-
-	// Launch detection goroutines
-	d.launchNodeMetadataDetection(g, gctx, node, result, resultChan)
-	d.launchRuntimeClassDetection(g, gctx, result, resultChan)
-
-	// Wait for results
-	go func() {
-		_ = g.Wait()
-
-		close(resultChan)
-	}()
-
-	return d.waitForDetectionResult(ctx, cancel, resultChan, result)
-}
-
-// launchNodeMetadataDetection launches the node metadata detection goroutine
-func (d *Detector) launchNodeMetadataDetection(
-	g *errgroup.Group,
-	gctx context.Context,
-	node *corev1.Node,
-	result *DetectionResult,
-	resultChan chan DetectionMethod,
-) {
-	g.Go(func() error {
-		method := DetectionMethodKubernetesAPI
-
-		result.mu.Lock()
-		result.AttemptedMethods = append(result.AttemptedMethods, method)
-		result.mu.Unlock()
-
-		start := time.Now()
-		isKata := d.checkNodeMetadata(node)
-		duration := time.Since(start)
-
-		if d.enableMetrics && metricsEnabled {
-			detectionAttempts.WithLabelValues(d.nodeName, string(method), "true").Inc()
-			detectionDuration.WithLabelValues(
-				d.nodeName,
-				string(method),
-				fmt.Sprintf("%t", isKata),
-			).Observe(duration.Seconds())
-		}
-
-		if isKata {
-			select {
-			case resultChan <- method:
-				slog.Info("Kata Containers detected via Kubernetes API", "node", d.nodeName)
-			case <-gctx.Done():
-			}
-		}
-
-		return nil
-	})
-}
-
-// launchRuntimeClassDetection launches the RuntimeClass detection goroutine
-func (d *Detector) launchRuntimeClassDetection(
-	g *errgroup.Group,
-	gctx context.Context,
-	result *DetectionResult,
-	resultChan chan DetectionMethod,
-) {
-	g.Go(func() error {
-		method := DetectionMethodRuntimeClass
-
-		result.mu.Lock()
-		result.AttemptedMethods = append(result.AttemptedMethods, method)
-		result.mu.Unlock()
-
-		start := time.Now()
-		isKata, err := d.detectViaRuntimeClass(gctx)
-		duration := time.Since(start)
-
-		if d.enableMetrics && metricsEnabled {
-			detectionAttempts.WithLabelValues(
-				d.nodeName,
-				string(method),
-				fmt.Sprintf("%t", err == nil),
-			).Inc()
-			detectionDuration.WithLabelValues(
-				d.nodeName,
-				string(method),
-				fmt.Sprintf("%t", isKata),
-			).Observe(duration.Seconds())
-		}
-
-		if err != nil {
-			result.mu.Lock()
-			result.Errors = append(result.Errors, fmt.Errorf("runtime class detection: %w", err))
-			result.mu.Unlock()
-
-			slog.Warn("RuntimeClass-based Kata detection failed", "error", err)
-
-			return nil
-		}
-
-		if isKata {
-			select {
-			case resultChan <- method:
-				slog.Info("Kata Containers detected via RuntimeClass", "node", d.nodeName)
-			case <-gctx.Done():
-			}
-		}
-
-		return nil
-	})
-}
-
-// waitForDetectionResult waits for the first positive result or timeout
-func (d *Detector) waitForDetectionResult(
-	ctx context.Context,
-	cancel context.CancelFunc,
-	resultChan chan DetectionMethod,
-	result *DetectionResult,
-) error {
-	var method DetectionMethod
-
-	select {
-	case m := <-resultChan:
-		if m != "" {
-			method = m
-
-			result.IsKata = true
-
-			result.Method = method
-
-			cancel()
-		}
-	case <-ctx.Done():
-		if d.enableMetrics && metricsEnabled {
-			detectionResults.WithLabelValues(d.nodeName, "timeout").Inc()
-		}
-
-		return ctx.Err()
-	}
-
-	// Drain remaining results
-	for range resultChan {
 	}
 
 	return nil
@@ -494,52 +333,4 @@ func (d *Detector) checkNodeAnnotations(node *corev1.Node) bool {
 	}
 
 	return false
-}
-
-// detectViaRuntimeClass checks RuntimeClass resources for Kata handlers.
-// Uses TTL-based caching to minimize API load in large clusters (2000+ nodes).
-func (d *Detector) detectViaRuntimeClass(ctx context.Context) (bool, error) {
-	// Check cache first
-	d.rcCache.mu.RLock()
-	if time.Since(d.rcCache.lastChecked) < d.rcCache.ttl {
-		result := d.rcCache.hasKata
-		d.rcCache.mu.RUnlock()
-		slog.Debug(
-			"Using cached RuntimeClass detection result",
-			"hasKata", result,
-			"age", time.Since(d.rcCache.lastChecked),
-		)
-
-		return result, nil
-	}
-	d.rcCache.mu.RUnlock()
-
-	// Query API for RuntimeClasses
-	rcList, err := d.clientset.NodeV1().RuntimeClasses().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return false, fmt.Errorf("failed to list RuntimeClasses: %w", err)
-	}
-
-	// Check for Kata runtime handlers
-	hasKata := false
-
-	for _, rc := range rcList.Items {
-		handler := strings.ToLower(rc.Handler)
-
-		if strings.Contains(handler, "kata") {
-			slog.Debug("Kata RuntimeClass detected", "name", rc.Name, "handler", rc.Handler)
-
-			hasKata = true
-
-			break
-		}
-	}
-
-	// Update cache
-	d.rcCache.mu.Lock()
-	d.rcCache.hasKata = hasKata
-	d.rcCache.lastChecked = time.Now()
-	d.rcCache.mu.Unlock()
-
-	return hasKata, nil
 }

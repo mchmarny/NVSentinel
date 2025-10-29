@@ -19,10 +19,9 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"sync"
+	"strings"
 	"time"
 
-	"github.com/nvidia/nvsentinel/health-monitors/syslog-health-monitor/pkg/kata"
 	"github.com/nvidia/nvsentinel/labeler-module/pkg/metrics"
 
 	v1 "k8s.io/api/core/v1"
@@ -61,8 +60,6 @@ type Labeler struct {
 	ctx            context.Context
 	dcgmAppLabel   string
 	driverAppLabel string
-	kataDetectors  map[string]*kata.CachedDetector
-	kataDetectorMu sync.RWMutex
 }
 
 // NewLabeler creates a new Labeler instance
@@ -118,7 +115,6 @@ func NewLabeler(clientset kubernetes.Interface, resyncPeriod time.Duration,
 		ctx:            context.Background(),
 		dcgmAppLabel:   dcgmApp,
 		driverAppLabel: driverApp,
-		kataDetectors:  make(map[string]*kata.CachedDetector),
 	}
 
 	_, err = l.informer.AddEventHandler(cache.FilteringResourceEventHandler{
@@ -246,60 +242,76 @@ func (l *Labeler) getDriverLabelForNode(nodeName string) (string, error) {
 	return "", nil
 }
 
-// getKataLabelForNode detects if Kata is enabled on the specified node
-// Returns "true" if Kata is enabled, "false" if not, or error if detection fails
+// getKataLabelForNode detects if Kata is enabled on the specified node by checking node metadata.
+// This uses the Kubernetes API which is backed by client-go's cache, so it's efficient.
+// Returns "true" if Kata is enabled, "false" if not, or error if detection fails.
 func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
-	// Get or create cached detector for this node
-	cachedDetector, err := l.getOrCreateKataDetector(nodeName)
-	if err != nil {
-		return "", fmt.Errorf("failed to get kata detector for node %s: %w", nodeName, err)
-	}
-
-	// Detect kata with context timeout
 	ctx, cancel := context.WithTimeout(l.ctx, 5*time.Second)
 	defer cancel()
 
-	result, err := cachedDetector.IsKataEnabled(ctx)
+	// Get node from Kubernetes API (backed by client-go cache)
+	node, err := l.clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
-		return "", fmt.Errorf("failed to detect kata on node %s: %w", nodeName, err)
+		return "", fmt.Errorf("failed to get node %s: %w", nodeName, err)
 	}
 
-	if result.IsKata {
+	// Check if Kata is enabled using multiple detection methods
+	if isKataEnabled(node) {
 		return LabelValueTrue, nil
 	}
 
 	return LabelValueFalse, nil
 }
 
-// getOrCreateKataDetector returns the cached detector for a node, creating it if needed
-func (l *Labeler) getOrCreateKataDetector(nodeName string) (*kata.CachedDetector, error) {
-	// Fast path: check if detector exists with read lock
-	l.kataDetectorMu.RLock()
-	if detector, exists := l.kataDetectors[nodeName]; exists {
-		l.kataDetectorMu.RUnlock()
-		return detector, nil
-	}
-	l.kataDetectorMu.RUnlock()
-
-	// Slow path: create detector with write lock
-	l.kataDetectorMu.Lock()
-	defer l.kataDetectorMu.Unlock()
-
-	// Double-check after acquiring write lock
-	if detector, exists := l.kataDetectors[nodeName]; exists {
-		return detector, nil
+// isKataEnabled checks if a node has Kata Containers enabled by examining:
+// 1. Container runtime version
+// 2. Node labels
+// 3. Node annotations
+func isKataEnabled(node *v1.Node) bool {
+	// Check 1: Container runtime version contains "kata"
+	runtime := strings.ToLower(node.Status.NodeInfo.ContainerRuntimeVersion)
+	if strings.Contains(runtime, "kata") {
+		slog.Debug("Kata detected in container runtime version", "node", node.Name, "runtime", runtime)
+		return true
 	}
 
-	// Create new detector with 15-minute cache TTL
-	detector, err := kata.NewDetector(nodeName, l.clientset)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kata detector: %w", err)
+	// Check 2: Common Kata-related node labels
+	kataLabels := []string{
+		"katacontainers.io/kata-runtime",
+		"kata-containers.io/runtime",
+		"node.kubernetes.io/kata-enabled",
+		"kata.io/enabled",
+		"runtime.kata",
 	}
 
-	cachedDetector := kata.NewCachedDetector(detector, 15*time.Minute)
-	l.kataDetectors[nodeName] = cachedDetector
+	for _, label := range kataLabels {
+		if value, exists := node.Labels[label]; exists && isTruthyValue(value) {
+			slog.Debug("Kata detected via node label", "node", node.Name, "label", label, "value", value)
+			return true
+		}
+	}
 
-	return cachedDetector, nil
+	// Check 3: Kata-related annotations
+	kataAnnotations := []string{
+		"kata-runtime.io/enabled",
+		"io.katacontainers.config",
+	}
+
+	for _, annotation := range kataAnnotations {
+		if value, exists := node.Annotations[annotation]; exists && value != "" && isTruthyValue(value) {
+			slog.Debug("Kata detected via node annotation", "node", node.Name, "annotation", annotation, "value", value)
+			return true
+		}
+	}
+
+	return false
+}
+
+// isTruthyValue checks if a string represents a truthy state.
+// Returns true for: "true", "enabled", "1", "yes" (case-insensitive).
+func isTruthyValue(value string) bool {
+	lowerValue := strings.ToLower(value)
+	return lowerValue == "true" || lowerValue == "enabled" || lowerValue == "1" || lowerValue == "yes"
 }
 
 // getDCGMVersionForNodeExcluding returns the expected DCGM version for a specific node,

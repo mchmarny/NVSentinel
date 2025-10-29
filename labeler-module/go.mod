@@ -6,7 +6,6 @@ toolchain go1.25.3
 
 require (
 	github.com/nvidia/nvsentinel/commons v0.0.0
-	github.com/nvidia/nvsentinel/health-monitors/syslog-health-monitor v0.0.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sync v0.17.0
@@ -85,5 +84,3 @@ replace github.com/nvidia/nvsentinel/store-client-sdk => ../store-client-sdk
 replace github.com/nvidia/nvsentinel/data-models => ../data-models
 
 replace github.com/nvidia/nvsentinel/commons => ../commons
-
-replace github.com/nvidia/nvsentinel/health-monitors/syslog-health-monitor => ../health-monitors/syslog-health-monitor
