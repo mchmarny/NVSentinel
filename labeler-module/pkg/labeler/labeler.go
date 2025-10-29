@@ -41,6 +41,10 @@ const (
 
 	NodeDCGMIndex   = "nodeDCGM"
 	NodeDriverIndex = "nodeDriver"
+
+	// Label values
+	LabelValueTrue  = "true"
+	LabelValueFalse = "false"
 )
 
 var (
@@ -231,7 +235,7 @@ func (l *Labeler) getDriverLabelForNode(nodeName string) (string, error) {
 		}
 
 		if podutil.IsPodReady(pod) {
-			return "true", nil
+			return LabelValueTrue, nil
 		}
 	}
 
@@ -247,6 +251,7 @@ func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create kata detector for node %s: %w", nodeName, err)
 	}
+
 	cachedDetector := kata.NewCachedDetector(detector, 15*time.Minute)
 
 	// Detect kata with context timeout
@@ -259,9 +264,10 @@ func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
 	}
 
 	if result.IsKata {
-		return "true", nil
+		return LabelValueTrue, nil
 	}
-	return "false", nil
+
+	return LabelValueFalse, nil
 }
 
 // getDCGMVersionForNodeExcluding returns the expected DCGM version for a specific node,
@@ -315,7 +321,7 @@ func (l *Labeler) getDriverLabelForNodeExcluding(nodeName string, excludePod *v1
 		}
 
 		if podutil.IsPodReady(pod) {
-			return "true", nil
+			return LabelValueTrue, nil
 		}
 	}
 
@@ -428,6 +434,7 @@ func (l *Labeler) handlePodDeleteEvent(obj any) error {
 	if err != nil {
 		slog.Warn("Failed to detect Kata on node, skipping kata label update",
 			"node", pod.Spec.NodeName, "error", err)
+
 		expectedKataLabel = "" // Don't update kata label on error
 	}
 
@@ -461,6 +468,7 @@ func (l *Labeler) handlePodEvent(obj any) error {
 	if err != nil {
 		slog.Warn("Failed to detect Kata on node, skipping kata label update",
 			"node", pod.Spec.NodeName, "error", err)
+
 		expectedKataLabel = "" // Don't update kata label on error
 	}
 
