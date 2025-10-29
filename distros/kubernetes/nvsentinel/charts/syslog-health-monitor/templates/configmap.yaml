@@ -25,20 +25,10 @@ data:
   log_check_definitions.yaml: |
     checks:
       - name: "SysLogsXIDError"
-      {{- if .Values.global.kata.enabled }}
-        tags:
-          - "-u containerd.service"
-        {{- end }}
         journalPath: "/nvsentinel/var/log/journal/"
 
-      {{- if not .Values.global.kata.enabled }}
       - name: "SysLogsSXIDError"
         journalPath: "/nvsentinel/var/log/journal/"
-      {{- end }}
 
       - name: "SysLogsGPUFallenOff"
-      {{- if .Values.global.kata.enabled }}
-        tags:
-          - "-u containerd.service"
-        {{- end }}
         journalPath: "/nvsentinel/var/log/journal/"
