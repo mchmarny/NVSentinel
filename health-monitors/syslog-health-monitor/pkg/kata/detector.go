@@ -58,8 +58,8 @@ type DetectionResult struct {
 	Errors           []error
 }
 
-// runtimeClassCache provides TTL-based caching for RuntimeClass detection
-// This dramatically reduces API server load in large clusters (2000+ nodes)
+// runtimeClassCache provides TTL-based caching for RuntimeClass detection.
+// Reduces API server load in large clusters (2000+ nodes).
 type runtimeClassCache struct {
 	mu          sync.RWMutex
 	hasKata     bool
@@ -93,16 +93,16 @@ func WithMetrics(enabled bool) DetectorOption {
 	}
 }
 
-// WithRuntimeClassCacheTTL sets a custom TTL for RuntimeClass cache
-// Default is 10 minutes. Longer TTL reduces API load but may delay detection of changes.
+// WithRuntimeClassCacheTTL sets custom TTL for RuntimeClass cache.
+// Default is 10 minutes. Longer TTL reduces API load but delays change detection.
 func WithRuntimeClassCacheTTL(ttl time.Duration) DetectorOption {
 	return func(d *Detector) {
 		d.rcCache.ttl = ttl
 	}
 }
 
-// NewDetector creates a new Kata runtime detector with default configuration.
-// Returns an error if the node name is invalid according to DNS-1123 subdomain rules.
+// NewDetector creates a Kata runtime detector with default configuration.
+// Returns error if node name violates DNS-1123 subdomain rules.
 func NewDetector(nodeName string, clientset kubernetes.Interface, opts ...DetectorOption) (*Detector, error) {
 	// Validate node name according to Kubernetes DNS-1123 subdomain spec
 	if errs := validation.IsDNS1123Subdomain(nodeName); len(errs) > 0 {
@@ -127,8 +127,8 @@ func NewDetector(nodeName string, clientset kubernetes.Interface, opts ...Detect
 	return d, nil
 }
 
-// NewDetectorWithTimeout creates a new Kata runtime detector with custom timeout.
-// Deprecated: Use NewDetector with WithTimeout option instead.
+// NewDetectorWithTimeout creates Kata detector with custom timeout.
+// Deprecated: Use NewDetector with WithTimeout option.
 func NewDetectorWithTimeout(nodeName string, clientset kubernetes.Interface, timeout time.Duration) *Detector {
 	detector, err := NewDetector(nodeName, clientset, WithTimeout(timeout))
 	if err != nil {
@@ -146,17 +146,15 @@ func NewDetectorWithTimeout(nodeName string, clientset kubernetes.Interface, tim
 	return detector
 }
 
-// IsKataEnabled determines if Kata Containers runtime is enabled on the current node.
-// It uses authoritative Kubernetes API detection methods with concurrent execution:
-// 1. Kubernetes node status check (ContainerRuntimeVersion, labels, annotations)
-// 2. RuntimeClass detection (checks for kata RuntimeClass handlers)
+// IsKataEnabled determines if Kata Containers runtime is enabled on this node.
+// Uses concurrent Kubernetes API detection:
+// 1. Node status (ContainerRuntimeVersion, labels, annotations)
+// 2. RuntimeClass handlers
 //
-// Note: Filesystem detection is intentionally NOT used as filesystem artifacts
-// (binaries, directories) can persist after Kata is disabled, causing false positives.
-// Only API-based detection reflects the current, active runtime configuration.
+// Filesystem detection intentionally excluded - binaries/directories persist after
+// Kata is disabled, causing false positives. Only API reflects active config.
 //
-// Returns a DetectionResult with detailed information about the detection attempt,
-// including which methods were tried and any errors encountered.
+// Returns DetectionResult with attempted methods and any errors encountered.
 func (d *Detector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) {
 	// Respect parent context cancellation
 	if err := d.checkContextCancellation(ctx); err != nil {
@@ -384,7 +382,7 @@ func (d *Detector) recordDetectionResult(result *DetectionResult) {
 	}
 }
 
-// getNode retrieves the node object using direct API call with retry
+// getNode retrieves node object via API with retry on transient errors.
 func (d *Detector) getNode(ctx context.Context) (*corev1.Node, error) {
 	var node *corev1.Node
 
@@ -412,8 +410,7 @@ func (d *Detector) getNode(ctx context.Context) (*corev1.Node, error) {
 	return node, nil
 }
 
-// checkNodeMetadata examines node metadata for Kata indicators
-// This replaces detectViaKubernetesAPI and accepts a pre-fetched node
+// checkNodeMetadata examines node metadata for Kata indicators.
 func (d *Detector) checkNodeMetadata(node *corev1.Node) bool {
 	// Check 1: Examine container runtime version
 	if d.checkRuntimeVersion(node) {
@@ -429,7 +426,7 @@ func (d *Detector) checkNodeMetadata(node *corev1.Node) bool {
 	return d.checkNodeAnnotations(node)
 }
 
-// checkRuntimeVersion examines the container runtime version for Kata indicators
+// checkRuntimeVersion examines container runtime version for Kata indicators.
 func (d *Detector) checkRuntimeVersion(node *corev1.Node) bool {
 	runtime := strings.ToLower(node.Status.NodeInfo.ContainerRuntimeVersion)
 	if strings.Contains(runtime, "kata") {
@@ -440,7 +437,7 @@ func (d *Detector) checkRuntimeVersion(node *corev1.Node) bool {
 	return false
 }
 
-// checkNodeLabels looks for Kata-related node labels
+// checkNodeLabels looks for Kata-related node labels.
 func (d *Detector) checkNodeLabels(node *corev1.Node) bool {
 	kataLabels := []string{
 		"katacontainers.io/kata-runtime",
@@ -456,7 +453,7 @@ func (d *Detector) checkNodeLabels(node *corev1.Node) bool {
 			continue
 		}
 
-		// Check if label value indicates enabled (could be "true", "enabled", "1", etc.)
+		// Check if label value indicates enabled ("true", "enabled", "1", etc.)
 		lowerValue := strings.ToLower(value)
 
 		if lowerValue == "true" || lowerValue == "enabled" || lowerValue == "1" || lowerValue == "yes" {
@@ -468,7 +465,7 @@ func (d *Detector) checkNodeLabels(node *corev1.Node) bool {
 	return false
 }
 
-// checkNodeAnnotations examines node annotations for Kata configuration
+// checkNodeAnnotations examines node annotations for Kata configuration.
 func (d *Detector) checkNodeAnnotations(node *corev1.Node) bool {
 	kataAnnotations := []string{
 		"kata-runtime.io/enabled",
@@ -485,8 +482,8 @@ func (d *Detector) checkNodeAnnotations(node *corev1.Node) bool {
 	return false
 }
 
-// detectViaRuntimeClass checks RuntimeClass resources for Kata runtime handlers
-// Uses TTL-based caching to minimize API server load in large clusters (2000+ nodes)
+// detectViaRuntimeClass checks RuntimeClass resources for Kata handlers.
+// Uses TTL-based caching to minimize API load in large clusters (2000+ nodes).
 func (d *Detector) detectViaRuntimeClass(ctx context.Context) (bool, error) {
 	// Check cache first
 	d.rcCache.mu.RLock()
@@ -503,7 +500,7 @@ func (d *Detector) detectViaRuntimeClass(ctx context.Context) (bool, error) {
 	}
 	d.rcCache.mu.RUnlock()
 
-	// Direct API call
+	// Query API for RuntimeClasses
 	rcList, err := d.clientset.NodeV1().RuntimeClasses().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return false, fmt.Errorf("failed to list RuntimeClasses: %w", err)

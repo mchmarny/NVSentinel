@@ -20,9 +20,8 @@ import (
 	"time"
 )
 
-// CachedDetector wraps a Detector with caching capabilities to avoid
-// redundant detection operations. This is particularly useful for reducing
-// latency on pod restarts where the runtime configuration hasn't changed.
+// CachedDetector wraps a Detector with caching to avoid redundant detection
+// operations. Reduces latency on pod restarts when runtime config is unchanged.
 type CachedDetector struct {
 	detector     *Detector
 	mu           sync.RWMutex
@@ -31,9 +30,8 @@ type CachedDetector struct {
 	cacheTTL     time.Duration
 }
 
-// NewCachedDetector creates a new cached detector wrapper with the specified TTL.
-// A typical TTL for production environments is 5-15 minutes, as runtime
-// configuration changes are infrequent operational events.
+// NewCachedDetector creates a cached detector wrapper with the specified TTL.
+// Typical production TTL is 5-15 minutes since runtime config changes rarely.
 func NewCachedDetector(detector *Detector, ttl time.Duration) *CachedDetector {
 	return &CachedDetector{
 		detector: detector,
@@ -41,9 +39,8 @@ func NewCachedDetector(detector *Detector, ttl time.Duration) *CachedDetector {
 	}
 }
 
-// IsKataEnabled returns the cached detection result if available and not expired,
-// otherwise performs a new detection and caches the result.
-// This method is safe for concurrent use.
+// IsKataEnabled returns cached result if available and fresh, otherwise
+// performs new detection and caches it. Safe for concurrent use.
 func (cd *CachedDetector) IsKataEnabled(ctx context.Context) (*DetectionResult, error) {
 	// Fast path: check cache with read lock
 	cd.mu.RLock()
@@ -74,9 +71,8 @@ func (cd *CachedDetector) IsKataEnabled(ctx context.Context) (*DetectionResult, 
 	return result, err
 }
 
-// InvalidateCache clears the cached detection result, forcing a fresh
-// detection on the next call. This is useful after configuration changes
-// or when you suspect the cached result may be stale.
+// InvalidateCache clears cached result, forcing fresh detection on next call.
+// Use after config changes or when cached result may be stale.
 func (cd *CachedDetector) InvalidateCache() {
 	cd.mu.Lock()
 	defer cd.mu.Unlock()

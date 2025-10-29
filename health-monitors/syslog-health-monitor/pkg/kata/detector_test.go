@@ -29,13 +29,13 @@ import (
 func TestDetector_IsKataEnabled_NoClientset(t *testing.T) {
 	ctx := context.Background()
 
-	// Detector without clientset should fail as API detection is required
+	// Detector without clientset should fail - API detection required
 	detector, err := NewDetector("test-node", nil, WithMetrics(false))
 	if err != nil {
 		t.Fatalf("Failed to create detector: %v", err)
 	}
 
-	// Should error since filesystem detection is disabled
+	// Should error - no API access available
 	_, err = detector.IsKataEnabled(ctx)
 	if err == nil {
 		t.Error("IsKataEnabled() should return error when no clientset provided")
@@ -187,7 +187,7 @@ func TestDetector_detectViaKubernetesAPI(t *testing.T) {
 
 func TestDetector_detectViaKubernetesAPI_NodeNotFound(t *testing.T) {
 	ctx := context.Background()
-	clientset := fake.NewSimpleClientset() // Empty clientset
+	clientset := fake.NewSimpleClientset()
 	detector, err := NewDetector("non-existent-node", clientset, WithMetrics(false))
 	if err != nil {
 		t.Fatalf("Failed to create detector: %v", err)
@@ -222,7 +222,7 @@ func TestNewDetector(t *testing.T) {
 func TestDetector_IsKataEnabled_WithAPIFallback(t *testing.T) {
 	ctx := context.Background()
 
-	// Create a node with kata runtime
+	// Node with kata in runtime version
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-node",
@@ -240,7 +240,7 @@ func TestDetector_IsKataEnabled_WithAPIFallback(t *testing.T) {
 		t.Fatalf("Failed to create detector: %v", err)
 	}
 
-	// API should detect it
+	// Should detect via API
 	result, err := detector.IsKataEnabled(ctx)
 	if err != nil {
 		t.Errorf("IsKataEnabled() unexpected error: %v", err)
@@ -358,7 +358,7 @@ func TestDetector_ContextCancellation(t *testing.T) {
 		t.Fatalf("Failed to create detector: %v", err)
 	}
 
-	// Create already-cancelled context
+	// Pre-cancelled context
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -423,7 +423,7 @@ func TestCachedDetector(t *testing.T) {
 }
 
 func TestCachedDetector_Expiration(t *testing.T) {
-	// Create a node without kata
+	// Node without kata
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-node",
@@ -461,7 +461,7 @@ func TestCachedDetector_Expiration(t *testing.T) {
 }
 
 func TestDetector_DetectionResult(t *testing.T) {
-	// Create a node without kata
+	// Node without kata
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-node",
@@ -501,7 +501,7 @@ func TestDetector_DetectionResult(t *testing.T) {
 }
 
 func TestDetector_RuntimeClassCaching(t *testing.T) {
-	// Create a RuntimeClass with kata handler
+	// RuntimeClass with kata handler
 	rc := &nodev1.RuntimeClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "kata-qemu",
@@ -528,7 +528,7 @@ func TestDetector_RuntimeClassCaching(t *testing.T) {
 		t.Error("Expected Kata to be detected")
 	}
 
-	// Second call should use cache (much faster)
+	// Second call uses cache
 	start = time.Now()
 	isKata2, err := detector.detectViaRuntimeClass(context.Background())
 	duration2 := time.Since(start)
@@ -539,7 +539,7 @@ func TestDetector_RuntimeClassCaching(t *testing.T) {
 		t.Error("Expected Kata to be detected from cache")
 	}
 
-	// Cache should be faster (though in tests both are fast due to fake client)
+	// Cache faster in production (fake client makes both fast in tests)
 	t.Logf("First call: %v, Second call (cached): %v", duration1, duration2)
 
 	// Wait for cache to expire
