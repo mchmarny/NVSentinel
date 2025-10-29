@@ -218,7 +218,12 @@ func (d *Detector) validateClientset() error {
 }
 
 // runConcurrentDetection runs detection methods concurrently with early exit
-func (d *Detector) runConcurrentDetection(ctx context.Context, cancel context.CancelFunc, node *corev1.Node, result *DetectionResult) error {
+func (d *Detector) runConcurrentDetection(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	node *corev1.Node,
+	result *DetectionResult,
+) error {
 	g, gctx := errgroup.WithContext(ctx)
 	resultChan := make(chan DetectionMethod, 2)
 
@@ -236,7 +241,13 @@ func (d *Detector) runConcurrentDetection(ctx context.Context, cancel context.Ca
 }
 
 // launchNodeMetadataDetection launches the node metadata detection goroutine
-func (d *Detector) launchNodeMetadataDetection(g *errgroup.Group, gctx context.Context, node *corev1.Node, result *DetectionResult, resultChan chan DetectionMethod) {
+func (d *Detector) launchNodeMetadataDetection(
+	g *errgroup.Group,
+	gctx context.Context,
+	node *corev1.Node,
+	result *DetectionResult,
+	resultChan chan DetectionMethod,
+) {
 	g.Go(func() error {
 		method := DetectionMethodKubernetesAPI
 		result.AttemptedMethods = append(result.AttemptedMethods, method)
@@ -247,7 +258,11 @@ func (d *Detector) launchNodeMetadataDetection(g *errgroup.Group, gctx context.C
 
 		if d.enableMetrics {
 			detectionAttempts.WithLabelValues(d.nodeName, string(method), "true").Inc()
-			detectionDuration.WithLabelValues(d.nodeName, string(method), fmt.Sprintf("%t", isKata)).Observe(duration.Seconds())
+			detectionDuration.WithLabelValues(
+				d.nodeName,
+				string(method),
+				fmt.Sprintf("%t", isKata),
+			).Observe(duration.Seconds())
 		}
 
 		if isKata {
@@ -263,7 +278,12 @@ func (d *Detector) launchNodeMetadataDetection(g *errgroup.Group, gctx context.C
 }
 
 // launchRuntimeClassDetection launches the RuntimeClass detection goroutine
-func (d *Detector) launchRuntimeClassDetection(g *errgroup.Group, gctx context.Context, result *DetectionResult, resultChan chan DetectionMethod) {
+func (d *Detector) launchRuntimeClassDetection(
+	g *errgroup.Group,
+	gctx context.Context,
+	result *DetectionResult,
+	resultChan chan DetectionMethod,
+) {
 	g.Go(func() error {
 		method := DetectionMethodRuntimeClass
 		result.AttemptedMethods = append(result.AttemptedMethods, method)
@@ -273,8 +293,16 @@ func (d *Detector) launchRuntimeClassDetection(g *errgroup.Group, gctx context.C
 		duration := time.Since(start)
 
 		if d.enableMetrics {
-			detectionAttempts.WithLabelValues(d.nodeName, string(method), fmt.Sprintf("%t", err == nil)).Inc()
-			detectionDuration.WithLabelValues(d.nodeName, string(method), fmt.Sprintf("%t", isKata)).Observe(duration.Seconds())
+			detectionAttempts.WithLabelValues(
+				d.nodeName,
+				string(method),
+				fmt.Sprintf("%t", err == nil),
+			).Inc()
+			detectionDuration.WithLabelValues(
+				d.nodeName,
+				string(method),
+				fmt.Sprintf("%t", isKata),
+			).Observe(duration.Seconds())
 		}
 
 		if err != nil {
@@ -297,7 +325,12 @@ func (d *Detector) launchRuntimeClassDetection(g *errgroup.Group, gctx context.C
 }
 
 // waitForDetectionResult waits for the first positive result or timeout
-func (d *Detector) waitForDetectionResult(ctx context.Context, cancel context.CancelFunc, resultChan chan DetectionMethod, result *DetectionResult) error {
+func (d *Detector) waitForDetectionResult(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	resultChan chan DetectionMethod,
+	result *DetectionResult,
+) error {
 	var method DetectionMethod
 
 	select {
@@ -353,9 +386,11 @@ func (d *Detector) getNode(ctx context.Context) (*corev1.Node, error) {
 		func() error {
 			var err error
 			node, err = d.clientset.CoreV1().Nodes().Get(ctx, d.nodeName, metav1.GetOptions{})
+
 			return err
 		},
 	)
+
 	if retryErr != nil {
 		return nil, fmt.Errorf("failed to get node after retries: %w", retryErr)
 	}
@@ -465,6 +500,7 @@ func (d *Detector) detectViaRuntimeClass(ctx context.Context) (bool, error) {
 
 	for _, rc := range rcList.Items {
 		handler := strings.ToLower(rc.Handler)
+
 		if strings.Contains(handler, "kata") {
 			slog.Debug("Kata RuntimeClass detected", "name", rc.Name, "handler", rc.Handler)
 			hasKata = true
