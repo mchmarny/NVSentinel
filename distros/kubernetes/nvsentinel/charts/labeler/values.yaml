@@ -20,6 +20,14 @@ replicaCount: 1
 
 logLevel: info
 
+# Kata Containers detection configuration
+# Custom node label to check for Kata Containers support. If specified, the labeler
+# will check this label on nodes to determine if Kata is enabled, instead of using
+# the default 'nvsentinel.dgxc.nvidia.com/kata.enabled' label.
+# Example: 'io.katacontainers.config.hypervisor.path' to detect Kata installation
+# Note: The label value must be a truthy value (case-insensitive): "true", "enabled", "1", or "yes"
+kataLabelOverride: ""
+
 image:
   repository: ghcr.io/nvidia/nvsentinel/labeler-module
   pullPolicy: IfNotPresent
