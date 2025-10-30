@@ -271,6 +271,7 @@ func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get node %s from cache: %w", nodeName, err)
 	}
+
 	if !exists {
 		return "", fmt.Errorf("node %s not found in cache", nodeName)
 	}
