@@ -147,11 +147,13 @@ func run() error {
 
 		// Remove SysLogsSXIDError check for kata nodes (not supported in kata environment)
 		filteredChecks := make([]fd.CheckDefinition, 0, len(config.Checks))
+
 		for _, check := range config.Checks {
 			if check.Name != "SysLogsSXIDError" {
 				filteredChecks = append(filteredChecks, check)
 			}
 		}
+
 		config.Checks = filteredChecks
 	}
 
