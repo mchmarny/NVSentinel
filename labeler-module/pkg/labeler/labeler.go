@@ -19,9 +19,9 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"strings"
 	"time"
 
+	"github.com/nvidia/nvsentinel/commons/pkg/stringutil"
 	"github.com/nvidia/nvsentinel/labeler-module/pkg/metrics"
 
 	v1 "k8s.io/api/core/v1"
@@ -273,12 +273,12 @@ func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
 	return LabelValueFalse, nil
 }
 
-// isKataEnabled checks if a node has Kata Containers enabled by examining.
-// Checks Node labels first, then falls back to Node annotations.
+// isKataEnabled checks if a node has Kata Containers enabled by examining
+// Node labels first, then falls back to Node annotations.
 func isKataEnabled(node *v1.Node, kataLabels []string) bool {
 	// Labels
 	for _, label := range kataLabels {
-		if value, exists := node.Labels[label]; exists && isTruthyValue(value) {
+		if value, exists := node.Labels[label]; exists && stringutil.IsTruthyValue(value) {
 			slog.Debug("Kata detected",
 				"source", "label",
 				"node", node.Name,
@@ -297,9 +297,9 @@ func isKataEnabled(node *v1.Node, kataLabels []string) bool {
 	}
 
 	for _, annotation := range kataAnnotations {
-		if value, exists := node.Annotations[annotation]; exists && value != "" && isTruthyValue(value) {
+		if value, exists := node.Annotations[annotation]; exists && value != "" && stringutil.IsTruthyValue(value) {
 			slog.Debug("Kata detected",
-				"source", "label",
+				"source", "annotation",
 				"node", node.Name,
 				"annotation", annotation,
 				"value", value,
@@ -310,18 +310,6 @@ func isKataEnabled(node *v1.Node, kataLabels []string) bool {
 	}
 
 	return false
-}
-
-// isTruthyValue checks if a string represents a truthy state.
-// Returns true for: "true", "enabled", "1", "yes"
-// Case-insensitive.
-func isTruthyValue(value string) bool {
-	lowerValue := strings.TrimSpace(strings.ToLower(value))
-
-	return lowerValue == "true" ||
-		lowerValue == "enabled" ||
-		lowerValue == "1" ||
-		lowerValue == "yes"
 }
 
 // getDCGMVersionForNodeExcluding returns the expected DCGM version for a specific node,

@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nvidia/nvsentinel/commons/pkg/stringutil"
+
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -275,13 +277,6 @@ func (d *Detector) checkNodeMetadata(node *corev1.Node) bool {
 	return d.checkNodeAnnotations(node)
 }
 
-// isTruthyValue checks if a string value represents a truthy state.
-// Returns true for: "true", "enabled", "1", "yes" (case-insensitive).
-func isTruthyValue(value string) bool {
-	lowerValue := strings.ToLower(value)
-	return lowerValue == "true" || lowerValue == "enabled" || lowerValue == "1" || lowerValue == "yes"
-}
-
 // checkRuntimeVersion examines container runtime version for Kata indicators.
 func (d *Detector) checkRuntimeVersion(node *corev1.Node) bool {
 	runtime := strings.ToLower(node.Status.NodeInfo.ContainerRuntimeVersion)
@@ -310,7 +305,7 @@ func (d *Detector) checkNodeLabels(node *corev1.Node) bool {
 		}
 
 		// Check if label value indicates enabled ("true", "enabled", "1", etc.)
-		if isTruthyValue(value) {
+		if stringutil.IsTruthyValue(value) {
 			slog.Debug("Kata detected via node label", "label", label, "value", value)
 			return true
 		}
@@ -333,7 +328,7 @@ func (d *Detector) checkNodeAnnotations(node *corev1.Node) bool {
 		}
 
 		// Validate that the annotation value indicates enabled state
-		if isTruthyValue(value) {
+		if stringutil.IsTruthyValue(value) {
 			slog.Debug("Kata detected via node annotation", "annotation", annotation, "value", value)
 			return true
 		}
