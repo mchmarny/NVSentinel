@@ -25,7 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 )
@@ -650,18 +649,24 @@ func TestKataLabelOverride(t *testing.T) {
 		{
 			name:       "no override - default only",
 			override:   "",
-			wantLabels: []string{"katacontainers.io/kata-runtime"},
+			wantLabels: []string{KataRuntimeDefaultLabel},
 		},
 		{
 			name:       "with custom override",
 			override:   "custom.io/kata-enabled",
-			wantLabels: []string{"katacontainers.io/kata-runtime", "custom.io/kata-enabled"},
+			wantLabels: []string{KataRuntimeDefaultLabel, "custom.io/kata-enabled"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			clientset := fake.NewSimpleClientset()
+			testEnv := envtest.Environment{}
+			cfg, err := testEnv.Start()
+			require.NoError(t, err, "failed to setup envtest")
+			defer testEnv.Stop()
+
+			clientset, err := kubernetes.NewForConfig(cfg)
+			require.NoError(t, err, "failed to create kubernetes client")
 
 			l, err := NewLabeler(
 				clientset,
@@ -690,7 +695,13 @@ func TestKataLabelOverride(t *testing.T) {
 // TestKataLabelOverrideIsolation verifies that creating multiple labeler instances
 // with different overrides doesn't pollute each other (tests for race conditions).
 func TestKataLabelOverrideIsolation(t *testing.T) {
-	clientset := fake.NewSimpleClientset()
+	testEnv := envtest.Environment{}
+	cfg, err := testEnv.Start()
+	require.NoError(t, err, "failed to setup envtest")
+	defer testEnv.Stop()
+
+	clientset, err := kubernetes.NewForConfig(cfg)
+	require.NoError(t, err, "failed to create kubernetes client")
 
 	// Create first instance with override "first"
 	l1, err := NewLabeler(
@@ -734,4 +745,166 @@ func TestKataLabelOverrideIsolation(t *testing.T) {
 	}
 
 	t.Log("Successfully created 3 independent labeler instances with different overrides")
+}
+
+// TestKataLabelDetection tests that the labeler correctly detects and sets kata labels on nodes
+func TestKataLabelDetection(t *testing.T) {
+	tests := []struct {
+		name            string
+		node            *corev1.Node
+		kataOverride    string
+		expectedKataVal string
+		shouldHaveLabel bool
+	}{
+		{
+			name: "kata node with default label true",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "kata-node",
+					Labels: map[string]string{
+						KataRuntimeDefaultLabel: "true",
+					},
+				},
+			},
+			kataOverride:    "",
+			expectedKataVal: LabelValueTrue,
+			shouldHaveLabel: true,
+		},
+		{
+			name: "kata node with default label enabled",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "kata-node",
+					Labels: map[string]string{
+						KataRuntimeDefaultLabel: "enabled",
+					},
+				},
+			},
+			kataOverride:    "",
+			expectedKataVal: LabelValueTrue,
+			shouldHaveLabel: true,
+		},
+		{
+			name: "non-kata node with default label false",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "regular-node",
+					Labels: map[string]string{
+						KataRuntimeDefaultLabel: "false",
+					},
+				},
+			},
+			kataOverride:    "",
+			expectedKataVal: LabelValueFalse,
+			shouldHaveLabel: true,
+		},
+		{
+			name: "node with custom kata label",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "custom-kata-node",
+					Labels: map[string]string{
+						"custom.io/kata": "true",
+					},
+				},
+			},
+			kataOverride:    "custom.io/kata",
+			expectedKataVal: LabelValueTrue,
+			shouldHaveLabel: true,
+		},
+		{
+			name: "node without kata labels",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   "no-kata-node",
+					Labels: map[string]string{},
+				},
+			},
+			kataOverride:    "",
+			expectedKataVal: LabelValueFalse,
+			shouldHaveLabel: true,
+		},
+		{
+			name: "node with both default and custom kata labels - both true",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "both-kata-node",
+					Labels: map[string]string{
+						KataRuntimeDefaultLabel: "true",
+						"custom.io/kata":        "true",
+					},
+				},
+			},
+			kataOverride:    "custom.io/kata",
+			expectedKataVal: LabelValueTrue,
+			shouldHaveLabel: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			testEnv := envtest.Environment{}
+			cfg, err := testEnv.Start()
+			require.NoError(t, err, "failed to setup envtest")
+			defer testEnv.Stop()
+
+			cli, err := kubernetes.NewForConfig(cfg)
+			require.NoError(t, err, "failed to create kubernetes client")
+
+			// Create the node
+			_, err = cli.CoreV1().Nodes().Create(ctx, tt.node, metav1.CreateOptions{})
+			require.NoError(t, err, "failed to create node")
+
+			// Create labeler with kata override if specified
+			labeler, err := NewLabeler(cli, time.Minute, "nvidia-dcgm", "nvidia-driver-daemonset", tt.kataOverride)
+			require.NoError(t, err, "failed to create labeler")
+
+			// Start labeler
+			labelerCtx, labelerCancel := context.WithCancel(ctx)
+			defer labelerCancel()
+
+			go func() {
+				_ = labeler.Run(labelerCtx)
+			}()
+
+			// Wait for informer cache to sync
+			require.Eventually(t, func() bool {
+				return cache.WaitForCacheSync(labelerCtx.Done(), labeler.informersSynced...)
+			}, 10*time.Second, 100*time.Millisecond, "informer cache did not sync")
+
+			// Trigger kata detection by handling node event
+			err = labeler.handleNodeEvent(tt.node)
+			require.NoError(t, err, "failed to handle node event")
+
+			// Verify the kata label was set correctly
+			require.Eventually(t, func() bool {
+				node, err := cli.CoreV1().Nodes().Get(ctx, tt.node.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Logf("Failed to get node: %v", err)
+					return false
+				}
+
+				kataLabel, exists := node.Labels[KataEnabledLabel]
+				if !tt.shouldHaveLabel {
+					return !exists
+				}
+
+				if !exists {
+					t.Logf("Node %s missing kata.enabled label", tt.node.Name)
+					return false
+				}
+
+				if kataLabel != tt.expectedKataVal {
+					t.Logf("Node %s has wrong kata label: got %s, want %s", tt.node.Name, kataLabel, tt.expectedKataVal)
+					return false
+				}
+
+				t.Logf("✓ Node %s correctly has kata.enabled=%s", tt.node.Name, kataLabel)
+				return true
+			}, 15*time.Second, 500*time.Millisecond, "kata label not set correctly on node %s", tt.node.Name)
+		})
+	}
 }

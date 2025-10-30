@@ -45,8 +45,8 @@ var (
 	dcgmAppLabel   = flag.String("dcgm-app-label", "nvidia-dcgm", "App label value for DCGM pods")
 	driverAppLabel = flag.String("driver-app-label", "nvidia-driver-daemonset", "App label value for driver pods")
 	kataLabel      = flag.String("kata-label", "",
-		"Custom node label to check for Kata Containers support. "+
-			"If empty, uses default 'nvsentinel.dgxc.nvidia.com/kata.enabled'")
+		fmt.Sprintf("Custom node label to check for Kata Containers support. If empty, uses default '%s'",
+			labeler.KataRuntimeDefaultLabel))
 )
 
 func main() {

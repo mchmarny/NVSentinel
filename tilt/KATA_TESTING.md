@@ -131,7 +131,6 @@ tilt up
 
 - **`kwok-node-template.yaml`**: Template for regular GPU nodes
 - **`kwok-kata-node-template.yaml`**: Template for kata test nodes  
-- **`kata-runtimeclass.yaml`**: RuntimeClass resources (for pod scheduling, not detection)
 - **`Tiltfile`**: Creates nodes with configurable counts via environment variables
 
 ## Troubleshooting
