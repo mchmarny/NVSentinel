@@ -1,0 +1,73 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Daily Vulnerability Scan
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch: {}  # allow manual runs for testing
+
+permissions:
+  contents: read
+  actions: read
+  security-events: write  # required to upload SARIF
+
+concurrency:
+  group: scheduled-trivy-scan
+  cancel-in-progress: false
+
+env:
+  SARIF_OUTPUT: 'vulnerability-scan-results.sarif'
+  SEVERITY_LEVELS: 'HIGH,CRITICAL'
+  TRIVY_CACHE_DIR: '.trivy'
+
+jobs:
+  trivy-repo-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+
+      - name: Cache Trivy DB
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57  # v4.2.0
+        with:
+          path: ${{ env.TRIVY_CACHE_DIR }}
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: |
+            trivy-db-
+
+      - name: Scan Repo
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8  # v0.33.1
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          vuln-type: 'os,library'
+          scanners: 'vuln,secret,misconfig'
+          ignore-unfixed: true
+          hide-progress: true
+          format: 'sarif'
+          output: ${{ env.SARIF_OUTPUT }}
+          severity: ${{ env.SEVERITY_LEVELS }}
+          skip-dirs: 'vendor,node_modules'
+          exit-code: '1' # fail job but still upload SARIF
+        env:
+          TRIVY_CACHE_DIR: ${{ env.TRIVY_CACHE_DIR }}
+
+      - name: Upload Report
+        if: always()  # upload even if scan fails
+        uses: github/codeql-action/upload-sarif@16df4fbc19aea13d921737861d6c622bf3cefe23  # v2.23.0
+        with:
+          sarif_file: ${{ env.SARIF_OUTPUT }}
