@@ -26,6 +26,7 @@ func HasPrefixMatch(annotations map[string]string, prefixes []string) (string, s
 			}
 		}
 	}
+
 	return "", "", false
 }
 
@@ -33,6 +34,7 @@ func HasPrefixMatch(annotations map[string]string, prefixes []string) (string, s
 // Returns a map of matching annotation keys to their values.
 func FindAllPrefixMatches(annotations map[string]string, prefixes []string) map[string]string {
 	matches := make(map[string]string)
+
 	for key, value := range annotations {
 		for _, prefix := range prefixes {
 			if strings.HasPrefix(key, prefix) {
@@ -41,5 +43,6 @@ func FindAllPrefixMatches(annotations map[string]string, prefixes []string) map[
 			}
 		}
 	}
+
 	return matches
 }
