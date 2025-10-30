@@ -134,6 +134,7 @@ func run() error {
 	// Add kata-specific journal tags if running in Kata mode
 	if *kataEnabled == "true" {
 		slog.Info("Kata mode enabled, adding containerd service filter to journal checks")
+
 		for i := range config.Checks {
 			// Add "-u containerd.service" tag to filter for containerd logs in systemd journal
 			config.Checks[i].Tags = append(config.Checks[i].Tags, "-u", "containerd.service")
