@@ -559,8 +559,8 @@ func TestLabeler_handlePodEvent(t *testing.T) {
 				require.NoError(t, labeler.Run(ctx), "failed to run labeler")
 			}()
 
-			ok := cache.WaitForCacheSync(ctx.Done(), labeler.informersSynced...)
-			assert.True(t, ok, "failed to wait for cache sync")
+			synced := cache.WaitForCacheSync(ctx.Done(), labeler.informersSynced...)
+			assert.True(t, synced, "failed to wait for cache sync")
 
 			if tt.pod != nil {
 				p, err := cli.CoreV1().Pods(ns.Name).Get(ctx, tt.pod.Name, metav1.GetOptions{})

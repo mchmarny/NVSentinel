@@ -26,7 +26,7 @@ data:
   # Note: This ConfigMap is shared by both regular and kata DaemonSet variants.
   # Kata detection is handled by the labeler-module which sets the
   # "nvsentinel.dgxc.nvidia.com/kata.enabled" label on nodes. The DaemonSets
-  # use nodeAffinity to deploy the correct variant based on this label.
+  # use nodeSelector to deploy the correct variant based on this label.
   # 
   # Previously, kata-specific journal tags (e.g., "-u containerd.service") were
   # conditionally added here, but these are no longer needed because:

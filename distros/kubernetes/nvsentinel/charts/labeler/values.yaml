@@ -25,7 +25,7 @@ logLevel: info
 # will check BOTH this custom label AND the default 'katacontainers.io/kata-runtime' label as
 # input sources for detection. The labeler will then set the output label 
 # 'nvsentinel.dgxc.nvidia.com/kata.enabled' to "true" or "false" based on the detection result.
-# Example: 'io.katacontainers.config.hypervisor.path' to detect Kata via additional label
+# Example: 'custom.kata.label' or 'io.katacontainers.config.runtime.oci_runtime'
 # Note: The input label value must be truthy (case-insensitive): "true", "enabled", "1", or "yes"
 kataLabelOverride: ""
 
