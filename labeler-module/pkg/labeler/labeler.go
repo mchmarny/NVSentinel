@@ -285,6 +285,7 @@ func isKataEnabled(node *v1.Node, kataLabels []string) bool {
 				"label", label,
 				"value", value,
 			)
+
 			return true
 		}
 	}
@@ -303,6 +304,7 @@ func isKataEnabled(node *v1.Node, kataLabels []string) bool {
 				"annotation", annotation,
 				"value", value,
 			)
+
 			return true
 		}
 	}
@@ -315,6 +317,7 @@ func isKataEnabled(node *v1.Node, kataLabels []string) bool {
 // Case-insensitive.
 func isTruthyValue(value string) bool {
 	lowerValue := strings.TrimSpace(strings.ToLower(value))
+
 	return lowerValue == "true" ||
 		lowerValue == "enabled" ||
 		lowerValue == "1" ||
