@@ -297,30 +297,14 @@ func (l *Labeler) getDriverLabelForNode(nodeName string) (string, error) {
 }
 
 // getKataLabelForNode detects if Kata is enabled on the specified node by checking node metadata.
-// This uses the node informer cache for efficient lookups.
-// Returns "true" if Kata is enabled, "false" if not, or error if detection fails.
-func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
-	// Get node from informer cache
-	obj, exists, err := l.nodeInformer.GetIndexer().GetByKey(nodeName)
-	if err != nil {
-		return "", fmt.Errorf("failed to get node %s from cache: %w", nodeName, err)
-	}
-
-	if !exists {
-		return "", fmt.Errorf("node %s not found in cache", nodeName)
-	}
-
-	node, ok := obj.(*v1.Node)
-	if !ok {
-		return "", fmt.Errorf("object is not a node")
-	}
-
+// Returns "true" if Kata is enabled, "false" if not.
+func (l *Labeler) getKataLabelForNode(node *v1.Node) string {
 	// Check if Kata is enabled using multiple detection methods
 	if isKataEnabled(node, l.kataLabels) {
-		return LabelValueTrue, nil
+		return LabelValueTrue
 	}
 
-	return LabelValueFalse, nil
+	return LabelValueFalse
 }
 
 // isKataEnabled checks if a node has Kata Containers enabled by examining node labels.
@@ -447,11 +431,7 @@ func (l *Labeler) updateNodeLabelsForPod(nodeName, expectedDCGMVersion, expected
 
 		_, err = l.clientset.CoreV1().Nodes().Update(l.ctx, node, metav1.UpdateOptions{})
 
-		if err != nil {
-			return fmt.Errorf("failed to update node %s: %w", nodeName, err)
-		}
-
-		return nil
+		return err
 	})
 
 	if err != nil {
@@ -471,12 +451,7 @@ func (l *Labeler) handleNodeEvent(obj any) error {
 		return fmt.Errorf("node event: expected Node object, got %T", obj)
 	}
 
-	expectedKataLabel, err := l.getKataLabelForNode(node.Name)
-	if err != nil {
-		slog.Warn("Failed to detect Kata on node, skipping kata label update",
-			"node", node.Name, "error", err)
-		return nil // Don't fail the handler, just skip this node
-	}
+	expectedKataLabel := l.getKataLabelForNode(node)
 
 	// Only update kata label, leave DCGM/driver labels alone
 	return l.updateKataLabel(node.Name, expectedKataLabel)
@@ -510,11 +485,7 @@ func (l *Labeler) updateKataLabel(nodeName, expectedKataLabel string) error {
 
 		_, err = l.clientset.CoreV1().Nodes().Update(l.ctx, node, metav1.UpdateOptions{})
 
-		if err != nil {
-			return fmt.Errorf("failed to update node %s: %w", nodeName, err)
-		}
-
-		return nil
+		return err
 	})
 
 	if err != nil {

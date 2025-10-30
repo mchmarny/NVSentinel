@@ -902,7 +902,6 @@ func TestKataLabelDetection(t *testing.T) {
 					return false
 				}
 
-				t.Logf("✓ Node %s correctly has kata.enabled=%s", tt.node.Name, kataLabel)
 				return true
 			}, 15*time.Second, 500*time.Millisecond, "kata label not set correctly on node %s", tt.node.Name)
 		})
