@@ -44,7 +44,9 @@ var (
 	metricsPort    = flag.String("metrics-port", "2112", "Port to expose Prometheus metrics on")
 	dcgmAppLabel   = flag.String("dcgm-app-label", "nvidia-dcgm", "App label value for DCGM pods")
 	driverAppLabel = flag.String("driver-app-label", "nvidia-driver-daemonset", "App label value for driver pods")
-	kataLabel      = flag.String("kata-label", "", "Custom node label to check for Kata Containers support (e.g., 'io.katacontainers.config.hypervisor.path'). If empty, uses default detection of 'nvsentinel.dgxc.nvidia.com/kata.enabled'")
+	kataLabel      = flag.String("kata-label", "",
+		"Custom node label to check for Kata Containers support. "+
+			"If empty, uses default 'nvsentinel.dgxc.nvidia.com/kata.enabled'")
 )
 
 func main() {
