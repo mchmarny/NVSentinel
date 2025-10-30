@@ -432,3 +432,4 @@ fault-remediation-module/fault-remediation-module
 health-events-analyzer/health-events-analyzer
 node-drainer-module/node-drainer-module
 platform-connectors/platform-connectors
+health-monitors/syslog-health-monitor/syslog-health-monitor
