@@ -31,10 +31,11 @@ data:
   # Previously, kata-specific journal tags (e.g., "-u containerd.service") were
   # conditionally added here, but these are no longer needed because:
   # 1. Kata detection happens at the deployment level via node labels
-  # 2. Each DaemonSet variant (regular/kata) handles journal access appropriately
-  #    through its own hostPath mounts and container configuration
-  # 3. The kata-enabled flag is passed as a command-line argument to configure
-  #    runtime behavior without requiring different ConfigMap content
+  # 2. Each DaemonSet variant (regular/kata) handles journal access differently:
+  #    - Regular: mounts /var/log (file-based logs)
+  #    - Kata: mounts /run/log/journal and /var/log/journal (systemd journal)
+  # 3. The kata variant accesses the systemd journal directly, so it can read
+  #    containerd logs without needing special tags or filters in the ConfigMap
   log_check_definitions.yaml: |
     checks:
       - name: "SysLogsXIDError"
