@@ -60,15 +60,24 @@ type Labeler struct {
 	ctx            context.Context
 	dcgmAppLabel   string
 	driverAppLabel string
+	kataLabels     []string // Instance-specific kata labels
 }
 
 // NewLabeler creates a new Labeler instance
 // nolint: cyclop // todo
 func NewLabeler(clientset kubernetes.Interface, resyncPeriod time.Duration,
-	dcgmApp, driverApp string) (*Labeler, error) {
+	dcgmApp, driverApp, kataLabelOverride string) (*Labeler, error) {
 	labelSelector, err := labels.Parse(fmt.Sprintf("app in (%s,%s)", dcgmApp, driverApp))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse label selector: %w", err)
+	}
+
+	// Build kata labels list with default plus optional override
+	kataLabels := []string{
+		"katacontainers.io/kata-runtime",
+	}
+	if kataLabelOverride != "" {
+		kataLabels = append(kataLabels, kataLabelOverride)
 	}
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(
@@ -115,6 +124,7 @@ func NewLabeler(clientset kubernetes.Interface, resyncPeriod time.Duration,
 		ctx:            context.Background(),
 		dcgmAppLabel:   dcgmApp,
 		driverAppLabel: driverApp,
+		kataLabels:     kataLabels,
 	}
 
 	_, err = l.informer.AddEventHandler(cache.FilteringResourceEventHandler{
@@ -256,42 +266,30 @@ func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
 	}
 
 	// Check if Kata is enabled using multiple detection methods
-	if isKataEnabled(node) {
+	if isKataEnabled(node, l.kataLabels) {
 		return LabelValueTrue, nil
 	}
 
 	return LabelValueFalse, nil
 }
 
-// isKataEnabled checks if a node has Kata Containers enabled by examining:
-// 1. Container runtime version
-// 2. Node labels
-// 3. Node annotations
-func isKataEnabled(node *v1.Node) bool {
-	// Check 1: Container runtime version contains "kata"
-	runtime := strings.ToLower(node.Status.NodeInfo.ContainerRuntimeVersion)
-	if strings.Contains(runtime, "kata") {
-		slog.Debug("Kata detected in container runtime version", "node", node.Name, "runtime", runtime)
-		return true
-	}
-
-	// Check 2: Common Kata-related node labels
-	kataLabels := []string{
-		"katacontainers.io/kata-runtime",
-		"kata-containers.io/runtime",
-		"node.kubernetes.io/kata-enabled",
-		"kata.io/enabled",
-		"runtime.kata",
-	}
-
+// isKataEnabled checks if a node has Kata Containers enabled by examining.
+// Checks Node labels first, then falls back to Node annotations.
+func isKataEnabled(node *v1.Node, kataLabels []string) bool {
+	// Labels
 	for _, label := range kataLabels {
 		if value, exists := node.Labels[label]; exists && isTruthyValue(value) {
-			slog.Debug("Kata detected via node label", "node", node.Name, "label", label, "value", value)
+			slog.Debug("Kata detected",
+				"source", "label",
+				"node", node.Name,
+				"label", label,
+				"value", value,
+			)
 			return true
 		}
 	}
 
-	// Check 3: Kata-related annotations
+	// Fallback to annotations
 	kataAnnotations := []string{
 		"kata-runtime.io/enabled",
 		"io.katacontainers.config",
@@ -299,7 +297,12 @@ func isKataEnabled(node *v1.Node) bool {
 
 	for _, annotation := range kataAnnotations {
 		if value, exists := node.Annotations[annotation]; exists && value != "" && isTruthyValue(value) {
-			slog.Debug("Kata detected via node annotation", "node", node.Name, "annotation", annotation, "value", value)
+			slog.Debug("Kata detected",
+				"source", "label",
+				"node", node.Name,
+				"annotation", annotation,
+				"value", value,
+			)
 			return true
 		}
 	}
@@ -308,10 +311,14 @@ func isKataEnabled(node *v1.Node) bool {
 }
 
 // isTruthyValue checks if a string represents a truthy state.
-// Returns true for: "true", "enabled", "1", "yes" (case-insensitive).
+// Returns true for: "true", "enabled", "1", "yes"
+// Case-insensitive.
 func isTruthyValue(value string) bool {
-	lowerValue := strings.ToLower(value)
-	return lowerValue == "true" || lowerValue == "enabled" || lowerValue == "1" || lowerValue == "yes"
+	lowerValue := strings.TrimSpace(strings.ToLower(value))
+	return lowerValue == "true" ||
+		lowerValue == "enabled" ||
+		lowerValue == "1" ||
+		lowerValue == "yes"
 }
 
 // getDCGMVersionForNodeExcluding returns the expected DCGM version for a specific node,

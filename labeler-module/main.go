@@ -44,6 +44,7 @@ var (
 	metricsPort    = flag.String("metrics-port", "2112", "port to expose Prometheus metrics on")
 	dcgmAppLabel   = flag.String("dcgm-app-label", "nvidia-dcgm", "App label value for DCGM pods")
 	driverAppLabel = flag.String("driver-app-label", "nvidia-driver-daemonset", "App label value for driver pods")
+	kataLabel      = flag.String("kata-label", "", "Custom label to identify nodes with Kata Containers enabled")
 )
 
 func main() {
@@ -72,7 +73,7 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	labelerInstance, err := labeler.NewLabeler(clientset, 30*time.Second, *dcgmAppLabel, *driverAppLabel)
+	labelerInstance, err := labeler.NewLabeler(clientset, 30*time.Second, *dcgmAppLabel, *driverAppLabel, *kataLabel)
 	if err != nil {
 		return fmt.Errorf("error creating labeler instance: %w", err)
 	}

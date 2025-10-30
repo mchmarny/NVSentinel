@@ -553,7 +553,7 @@ func TestLabeler_handlePodEvent(t *testing.T) {
 				require.NoError(t, err, "failed to update pod status")
 			}
 
-			labeler, err := NewLabeler(cli, time.Minute, "nvidia-dcgm", "nvidia-driver-daemonset")
+			labeler, err := NewLabeler(cli, time.Minute, "nvidia-dcgm", "nvidia-driver-daemonset", "")
 			require.NoError(t, err)
 			go func() {
 				require.NoError(t, labeler.Run(ctx), "failed to run labeler")
