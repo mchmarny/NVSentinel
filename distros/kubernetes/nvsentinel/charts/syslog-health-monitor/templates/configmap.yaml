@@ -33,7 +33,7 @@ data:
   # 1. Kata detection happens at the deployment level via node labels
   # 2. Each DaemonSet variant (regular/kata) handles journal access differently:
   #    - Regular: mounts /var/log (file-based logs)
-  #    - Kata: mounts /run/log/journal and /var/log/journal (systemd journal)
+  #    - Kata: mounts /run/systemd/journal and /var/log/journal (systemd journal)
   # 3. The kata variant accesses the systemd journal directly, so it can read
   #    containerd logs without needing special tags or filters in the ConfigMap
   log_check_definitions.yaml: |

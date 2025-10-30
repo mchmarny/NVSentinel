@@ -309,6 +309,7 @@ func (l *Labeler) getKataLabelForNode(node *v1.Node) string {
 
 // isKataEnabled checks if a node has Kata Containers enabled by examining node labels.
 // Checks the configured kata labels (either custom override or default) for truthy values.
+// Returns true if ANY of the configured labels has a truthy value (OR logic).
 // Truthy values are: "true", "enabled", "1", "yes" (case-insensitive).
 func isKataEnabled(node *v1.Node, kataLabels []string) bool {
 	for _, label := range kataLabels {
@@ -475,13 +476,8 @@ func (l *Labeler) updateKataLabel(nodeName, expectedKataLabel string) error {
 			return nil
 		}
 
-		if expectedKataLabel == "" {
-			delete(node.Labels, KataEnabledLabel)
-			slog.Info("Removing Kata enabled label from node", "node", nodeName)
-		} else {
-			node.Labels[KataEnabledLabel] = expectedKataLabel
-			slog.Info("Setting Kata enabled label on node", "node", nodeName, "kata", expectedKataLabel)
-		}
+		node.Labels[KataEnabledLabel] = expectedKataLabel
+		slog.Info("Setting Kata enabled label on node", "node", nodeName, "kata", expectedKataLabel)
 
 		_, err = l.clientset.CoreV1().Nodes().Update(l.ctx, node, metav1.UpdateOptions{})
 

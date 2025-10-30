@@ -27,6 +27,7 @@ import (
 
 	"github.com/nvidia/nvsentinel/commons/pkg/logger"
 	"github.com/nvidia/nvsentinel/commons/pkg/server"
+	"github.com/nvidia/nvsentinel/commons/pkg/stringutil"
 	pb "github.com/nvidia/nvsentinel/data-models/pkg/protos"
 	fd "github.com/nvidia/nvsentinel/health-monitors/syslog-health-monitor/pkg/syslog-monitor"
 	"golang.org/x/sync/errgroup"
@@ -131,14 +132,27 @@ func run() error {
 		return fmt.Errorf("no checks defined in the config file")
 	}
 
-	// Add kata-specific journal tags if running in Kata mode
-	if *kataEnabled == "true" {
-		slog.Info("Kata mode enabled, adding containerd service filter to journal checks")
+	// Handle kata-specific configuration
+	if stringutil.IsTruthyValue(*kataEnabled) {
+		slog.Info("Kata mode enabled, adding containerd service filter and removing SysLogsSXIDError check")
 
+		// Add containerd service filter to all checks for kata nodes
 		for i := range config.Checks {
-			// Add "-u containerd.service" tag to filter for containerd logs in systemd journal
-			config.Checks[i].Tags = append(config.Checks[i].Tags, "-u", "containerd.service")
+			if config.Checks[i].Tags == nil {
+				config.Checks[i].Tags = []string{"-u", "containerd.service"}
+			} else {
+				config.Checks[i].Tags = append(config.Checks[i].Tags, "-u", "containerd.service")
+			}
 		}
+
+		// Remove SysLogsSXIDError check for kata nodes (not supported in kata environment)
+		filteredChecks := make([]fd.CheckDefinition, 0, len(config.Checks))
+		for _, check := range config.Checks {
+			if check.Name != "SysLogsSXIDError" {
+				filteredChecks = append(filteredChecks, check)
+			}
+		}
+		config.Checks = filteredChecks
 	}
 
 	slog.Info("Creating syslog monitor", "checksCount", len(config.Checks))
