@@ -29,6 +29,8 @@ metadata:
     nvidia.com/gpu.deploy.dcgm: "true"
     nvidia.com/gpu.deploy.driver: "true"
     type: kwok
+    # Explicitly mark as non-kata for detection
+    katacontainers.io/kata-runtime: "false"
   name: kwok-node-PLACEHOLDER
 spec:
   taints:

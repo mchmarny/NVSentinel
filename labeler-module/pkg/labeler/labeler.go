@@ -289,10 +289,10 @@ func (l *Labeler) getKataLabelForNode(nodeName string) (string, error) {
 	return LabelValueFalse, nil
 }
 
-// isKataEnabled checks if a node has Kata Containers enabled by examining
-// Node labels first, then falls back to Node annotations.
+// isKataEnabled checks if a node has Kata Containers enabled by examining node labels.
+// Checks the configured kata labels (either custom override or default) for truthy values.
+// Truthy values are: "true", "enabled", "1", "yes" (case-insensitive).
 func isKataEnabled(node *v1.Node, kataLabels []string) bool {
-	// Labels
 	for _, label := range kataLabels {
 		if value, exists := node.Labels[label]; exists && stringutil.IsTruthyValue(value) {
 			slog.Debug("Kata detected",

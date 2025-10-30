@@ -20,32 +20,33 @@ Total: 55 nodes (50 regular + 5 kata test nodes)
 
 ## Kata Detection Methods
 
-The mock Kata nodes have all detection signals configured:
+The labeler-module uses **label-based detection** to identify Kata-enabled nodes.
 
-1. **RuntimeVersion Detection** (Primary):
-   ```yaml
-   containerRuntimeVersion: containerd://1.7.0-kata
-   ```
+### Detection Process
 
-2. **Node Annotation Detection**:
-   ```yaml
-   io.katacontainers.config.runtime.oci_runtime: kata-runtime
-   ```
+1. **Input Labels Checked** (for detection):
+   - Default: `katacontainers.io/kata-runtime` (must have truthy value)
+   - Optional: Custom label via `--kata-label` flag (if configured)
+   - Truthy values: `"true"`, `"enabled"`, `"1"`, `"yes"` (case-insensitive)
 
-3. **Node Label Detection**:
-   ```yaml
-   katacontainers.io/kata-runtime: "true"
-   ```
+2. **Output Label Set** (detection result):
+   - `nvsentinel.dgxc.nvidia.com/kata.enabled: "true"` (if Kata detected)
+   - `nvsentinel.dgxc.nvidia.com/kata.enabled: "false"` (if not detected)
 
-**Note**: RuntimeClass resources are not used for detection because they are cluster-wide 
-and don't indicate which specific nodes support the runtime. Detection is based solely on 
-node metadata (runtime version, labels, annotations).
+### Mock Node Configuration
+
+The kata test nodes in `kwok-kata-test-node-template.yaml` are configured with:
+- **Node Label**: `katacontainers.io/kata-runtime: "true"` (used for detection)
+- **Node Annotation**: `io.katacontainers.config.runtime.oci_runtime: kata-runtime` (for reference only)
+
+**Note**: While the mock nodes include annotations and runtime version metadata for realism,
+the labeler-module currently only checks node labels for Kata detection.
 
 ## How It Works
 
-1. **KWOK nodes are created** with appropriate runtime signatures
-2. **Labeler-module detects Kata** on each node using the kata detector
-3. **Labeler sets the label**: `nvsentinel.dgxc.nvidia.com/kata.enabled: "true"` or `"false"`
+1. **KWOK nodes are created** with kata labels already set
+2. **Labeler-module checks input labels** (`katacontainers.io/kata-runtime` and optional custom labels)
+3. **Labeler sets the output label**: `nvsentinel.dgxc.nvidia.com/kata.enabled: "true"` or `"false"`
 4. **DaemonSets schedule accordingly**:
    - `syslog-health-monitor-kata` → Kata nodes (with systemd journal mounts)
    - `syslog-health-monitor-regular` → Regular nodes (with /var/log mounts)
