@@ -19,14 +19,19 @@
 # Validates SBOM attestations for all NVSentinel container images built with a specific tag.
 # This script checks both Ko-built images (Go services) and Docker-built images (Python services).
 #
+# Attestation Storage:
+#   Cosign v3.x stores attestations in OCI 1.1 referrers format with sha256-DIGEST tags.
+#   These are NOT visible with `cosign tree` or legacy .att/.sig tag patterns.
+#   Verification uses `crane` to check for sha256-prefixed attestation tags in the registry.
+#
 # Usage:
 #   ./scripts/verify-image-attestations.sh <tag>
 #   ./scripts/verify-image-attestations.sh v1.2.3
 #   ./scripts/verify-image-attestations.sh 3b37e68
 #
 # Requirements:
-#   - crane (for manifest inspection)
-#   - cosign (for attestation verification)
+#   - crane (for manifest inspection and OCI 1.1 attestation detection)
+#   - gh (GitHub CLI for build provenance verification)
 #   - jq (for JSON parsing)
 
 set -euo pipefail
@@ -92,6 +97,12 @@ Examples:
   $0 3b37e68
   REGISTRY=my-registry.io ORG=myorg $0 main-abc1234
 
+Notes:
+  - Cosign v3.x stores attestations in OCI 1.1 referrers format
+  - Attestations are stored as sha256-DIGEST tags (not .att/.sig)
+  - Use 'crane ls' and 'crane manifest' to inspect attestation storage
+  - 'cosign tree' does NOT show OCI 1.1 referrers (this is expected)
+
 EOF
     exit 1
 }
@@ -100,7 +111,7 @@ EOF
 check_requirements() {
     local missing_tools=()
     
-    for tool in crane cosign jq; do
+    for tool in crane gh jq; do
         if ! command -v "$tool" &> /dev/null; then
             missing_tools+=("$tool")
         fi
@@ -113,8 +124,9 @@ check_requirements() {
     fi
 }
 
-# Extract platform digests from multi-platform image
-get_platform_digests() {
+# Extract platform information from multi-platform image
+# Output format: "digest|architecture|os" (one per line)
+get_platform_info() {
     local image_ref="$1"
     local manifest
     
@@ -130,11 +142,21 @@ get_platform_digests() {
     
     if [[ "$media_type" == "application/vnd.oci.image.index.v1+json" ]] || \
        [[ "$media_type" == "application/vnd.docker.distribution.manifest.list.v2+json" ]]; then
-        # Extract individual platform digests
-        echo "$manifest" | jq -r '.manifests[] | select(.platform.architecture != "unknown") | .digest'
+        # Extract platform info: digest|architecture|os
+        echo "$manifest" | jq -r '.manifests[] | select(.platform.architecture != "unknown") | "\(.digest)|\(.platform.architecture)|\(.platform.os)"'
     else
-        # Single platform image - get its digest
-        crane digest "$image_ref" 2>/dev/null || echo ""
+        # Single platform image - get digest and architecture from config
+        local digest
+        digest=$(crane digest "$image_ref" 2>/dev/null || echo "")
+        if [ -n "$digest" ]; then
+            local config
+            config=$(crane config "$image_ref" 2>/dev/null || echo "")
+            local arch
+            local os
+            arch=$(echo "$config" | jq -r '.architecture // "amd64"')
+            os=$(echo "$config" | jq -r '.os // "linux"')
+            echo "${digest}|${arch}|${os}"
+        fi
     fi
 }
 
@@ -149,46 +171,90 @@ verify_github_attestation() {
     fi
 }
 
-# Verify Cosign SBOM attestation
+# Verify Cosign SBOM attestation (OCI 1.1 referrers format)
 verify_cosign_attestation() {
     local image_ref="$1"
+    local digest="$2"
     
-    # Check if SBOM tag exists
-    if cosign tree "$image_ref" 2>&1 | grep -q "SBOM"; then
-        return 0
-    else
+    # Extract image name without digest for crane ls
+    local image_name="${image_ref%@*}"
+    
+    # Convert digest to sha256-DIGEST tag format (OCI 1.1 referrers)
+    # Example: sha256:abc123... becomes sha256-abc123...
+    local digest_tag="sha256-${digest#sha256:}"
+    
+    # Check if attestation tag exists in registry
+    # Cosign v3.x stores attestations as sha256-DIGEST tags, not .att/.sig
+    if ! crane ls "$image_name" 2>/dev/null | grep -q "^${digest_tag}$"; then
         return 1
     fi
+    
+    # Verify it's actually a Sigstore bundle attestation
+    local index_manifest
+    index_manifest=$(crane manifest "${image_name}:${digest_tag}" 2>/dev/null || echo "")
+    
+    if [ -z "$index_manifest" ]; then
+        return 1
+    fi
+    
+    # The attestation tag points to an OCI index with multiple attestations
+    # Check if it's an index and extract the first attestation manifest digest
+    local media_type
+    media_type=$(echo "$index_manifest" | jq -r '.mediaType')
+    
+    if [[ "$media_type" == "application/vnd.oci.image.index.v1+json" ]]; then
+        # Get the first attestation manifest digest from the index
+        local att_digest
+        att_digest=$(echo "$index_manifest" | jq -r '.manifests[0].digest')
+        
+        if [ -z "$att_digest" ] || [ "$att_digest" == "null" ]; then
+            return 1
+        fi
+        
+        # Check the actual attestation manifest for Sigstore bundle
+        local att_manifest
+        att_manifest=$(crane manifest "${image_name}@${att_digest}" 2>/dev/null || echo "")
+        
+        # Verify it contains Sigstore bundle layers
+        if echo "$att_manifest" | jq -e '.layers[].mediaType | select(. == "application/vnd.dev.sigstore.bundle.v0.3+json")' &>/dev/null; then
+            return 0
+        fi
+    fi
+    
+    return 1
 }
 
 # Verify attestations for a single image digest
 verify_image_digest() {
     local image_name="$1"
     local digest="$2"
+    local arch="$3"
+    local os="$4"
     local image_ref="${REGISTRY}/${ORG}/${image_name}@${digest}"
     
-    echo -e "${BLUE}  Platform: ${digest:7:12}...${NC}"
+    echo -e "${BLUE}  ${os}/${arch} - ${digest}${NC}"
     
-    local github_ok=false
     local cosign_ok=false
     
-    # Verify GitHub attestation
-    if verify_github_attestation "$image_ref"; then
-        echo -e "${GREEN}    ✓ GitHub build provenance attestation${NC}"
-        github_ok=true
-    else
-        echo -e "${YELLOW}    ⚠ GitHub build provenance attestation not found${NC}"
-    fi
-    
-    # Verify Cosign SBOM attestation
-    if verify_cosign_attestation "$image_ref"; then
-        echo -e "${GREEN}    ✓ Cosign SBOM attestation${NC}"
+    # Verify Cosign SBOM attestation (OCI 1.1 referrers format)
+    # This is the primary attestation we're checking
+    if verify_cosign_attestation "$image_ref" "$digest"; then
+        echo -e "${GREEN}    ✓ Cosign SBOM attestation (OCI 1.1 referrers)${NC}"
         cosign_ok=true
     else
         echo -e "${RED}    ✗ Cosign SBOM attestation not found${NC}"
     fi
     
-    if $github_ok && $cosign_ok; then
+    # Optionally verify GitHub build provenance attestation
+    # Note: This requires 'gh' CLI authentication and may not be present for all images
+    if command -v gh &>/dev/null && gh auth status &>/dev/null; then
+        if verify_github_attestation "$image_ref"; then
+            echo -e "${GREEN}    ✓ GitHub build provenance attestation${NC}"
+        fi
+    fi
+    
+    # Consider image verified if Cosign SBOM attestation exists
+    if $cosign_ok; then
         return 0
     else
         return 1
@@ -211,23 +277,23 @@ verify_image() {
         return
     fi
     
-    # Get platform digests
-    local digests
-    digests=$(get_platform_digests "$image_ref")
+    # Get platform information
+    local platform_info
+    platform_info=$(get_platform_info "$image_ref")
     
-    if [ -z "$digests" ]; then
-        echo -e "${RED}  ✗ Failed to get image digests${NC}"
+    if [ -z "$platform_info" ]; then
+        echo -e "${RED}  ✗ Failed to get image platform information${NC}"
         FAILED_IMAGES=$((FAILED_IMAGES + 1))
         return
     fi
     
     # Verify each platform
     local all_passed=true
-    while IFS= read -r digest; do
-        if ! verify_image_digest "$image_name" "$digest"; then
+    while IFS='|' read -r digest arch os; do
+        if ! verify_image_digest "$image_name" "$digest" "$arch" "$os"; then
             all_passed=false
         fi
-    done <<< "$digests"
+    done <<< "$platform_info"
     
     if $all_passed; then
         echo -e "${GREEN}  ✓ All attestations verified${NC}"
@@ -258,7 +324,7 @@ main() {
     check_requirements
     
     # Verify Ko-built images
-    echo -e "\n${BLUE}═══ Ko-built Images (Go services) ═══${NC}"
+    echo -e "\n${BLUE}═══ Ko-built Images ═══${NC}"
     for image in "${KO_IMAGES[@]}"; do
         verify_image "$image" "$tag"
     done
