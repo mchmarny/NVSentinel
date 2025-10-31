@@ -81,3 +81,34 @@ runs:
         subject-name: ${{ steps.image.outputs.name }}
         subject-digest: ${{ steps.image.outputs.digest }}
         push-to-registry: true
+
+    - name: Derive safe filename
+      id: name
+      shell: bash
+      run: |
+        IMAGE="${{ steps.image.outputs.name  }}"
+        SAFE="$(basename "${IMAGE%%:*}")"  # strip tag if present, then basename
+        echo "safe=$SAFE" >> "$GITHUB_OUTPUT"
+
+    - name: Generate SBOM
+      uses: anchore/sbom-action@8e94d75ddd33f69f691467e42275782e4bfefe84  # v0.20.9
+      with:
+        image: ${{ steps.image.outputs.name  }}@${{ steps.image.outputs.digest }}
+        format: cyclonedx-json
+        output-file: sbom-${{ steps.name.outputs.safe }}.cdx.json
+        upload-artifact: true          # also uploads to the workflow run
+        upload-release-assets: auto    # 'auto' == assets on tags
+
+    - name: Install Cosign
+      uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
+
+    - name: Cosign SBOM attestation
+      shell: bash
+      env:
+        COSIGN_EXPERIMENTAL: "1"
+      run: |
+        cosign attest \
+          --yes \
+          --predicate sbom-${{ steps.name.outputs.safe }}.cdx.json \
+          --type cyclonedx \
+          ${{ steps.image.outputs.name  }}@${{ steps.image.outputs.digest }}

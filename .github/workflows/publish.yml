@@ -71,7 +71,7 @@ jobs:
             echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            echo "value=${{ github.ref_name }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "value=${SHORT_SHA}" >> $GITHUB_OUTPUT
           fi
 
       - name: Build image list
@@ -90,7 +90,7 @@ jobs:
           path: versions.txt
           retention-days: 90
 
-  container-publish:
+  build-images-docker:
     runs-on: linux-amd64-cpu32
     timeout-minutes: 60
     strategy:
@@ -130,7 +130,7 @@ jobs:
             echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            echo "value=${{ github.ref_name }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "value=${SHORT_SHA}" >> $GITHUB_OUTPUT
           fi
 
       - name: Publish container for ${{ matrix.component }}
@@ -144,7 +144,7 @@ jobs:
           tag_suffix: ${{ matrix.tag_suffix }}
 
   # Build images using ko and attest provenance
-  build-images:
+  build-images-ko:
     runs-on: linux-amd64-cpu32
     timeout-minutes: 60
     permissions:
@@ -175,7 +175,7 @@ jobs:
             echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            echo "value=${{ github.ref_name }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "value=${SHORT_SHA}" >> $GITHUB_OUTPUT
           fi
 
       # ko is already installed in the setup-ci-env action
@@ -190,7 +190,7 @@ jobs:
         run: scripts/buildko.sh
 
   attest:
-    needs: build-images
+    needs: build-images-ko
     runs-on: linux-amd64-cpu32
     permissions:
       packages: write
@@ -198,7 +198,7 @@ jobs:
       attestations: write
     strategy:
       matrix:
-        image: ${{ fromJson(needs.build-images.outputs.images) }}
+        image: ${{ fromJson(needs.build-images-ko.outputs.images) }}
     steps:
       - name: Authenticate to GHCR
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef  # v3.6.0
@@ -216,7 +216,7 @@ jobs:
           push-to-registry: true
 
   sbom-ko:
-    needs: build-images
+    needs: build-images-ko
     runs-on: linux-amd64-cpu32
     permissions:
       contents: read
@@ -225,7 +225,7 @@ jobs:
       security-events: write  # only needed if you also upload SARIF somewhere
     strategy:
       matrix:
-        image: ${{ fromJson(needs.build-images.outputs.images) }}
+        image: ${{ fromJson(needs.build-images-ko.outputs.images) }}
     steps:
       - name: Authenticate to GHCR
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef  # v3.6.0
@@ -269,8 +269,8 @@ jobs:
     runs-on: linux-amd64-cpu32
     timeout-minutes: 60
     needs:
-      - container-publish
-      - build-images
+      - build-images-docker
+      - build-images-ko
       - attest
       - sbom-ko
     env:
@@ -311,7 +311,7 @@ jobs:
             echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            echo "value=${{ github.ref_name }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "value=${SHORT_SHA}" >> $GITHUB_OUTPUT
           fi
 
       - name: Prep system for multi-node Kind cluster
