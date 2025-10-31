@@ -60,7 +60,7 @@ builds:
     dir: platform-connectors
     main: .
 
-labels:
+annotations:
   org.opencontainers.image.source: "https://github.com/nvidia/nvsentinel"
   org.opencontainers.image.licenses: "Apache-2.0"
   org.opencontainers.image.title: "NVSentinel"
