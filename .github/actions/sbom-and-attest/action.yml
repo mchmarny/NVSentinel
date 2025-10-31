@@ -52,6 +52,24 @@ runs:
         output-file: sbom-${{ steps.name.outputs.safe }}.cdx.json
         upload-artifact: true          # also uploads to the workflow run
         upload-release-assets: auto    # 'auto' == assets on tags
+    
+    - name: Verify SBOM generated
+      shell: bash
+      run: |
+        echo "::group::Verify SBOM file"
+        SBOM_FILE="sbom-${{ steps.name.outputs.safe }}.cdx.json"
+        if [ -f "$SBOM_FILE" ]; then
+          echo "✅ SBOM file exists: $SBOM_FILE"
+          echo "File size: $(ls -lh "$SBOM_FILE" | awk '{print $5}')"
+          echo "First 10 lines:"
+          head -10 "$SBOM_FILE"
+        else
+          echo "::error::SBOM file not found: $SBOM_FILE"
+          echo "Contents of current directory:"
+          ls -la
+          exit 1
+        fi
+        echo "::endgroup::"
 
     - name: Install Cosign
       uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
@@ -61,13 +79,31 @@ runs:
       env:
         COSIGN_EXPERIMENTAL: "1"
       run: |
-        echo "Attesting SBOM for ${{ inputs.image_name }}@${{ inputs.image_digest }}"
+        set -euo pipefail  # Fail on any error
+        
+        echo "::group::Cosign SBOM Attestation"
+        echo "Image: ${{ inputs.image_name }}@${{ inputs.image_digest }}"
+        echo "SBOM file: sbom-${{ steps.name.outputs.safe }}.cdx.json"
+        echo "COSIGN_EXPERIMENTAL: ${COSIGN_EXPERIMENTAL}"
+        
+        # Verify SBOM file exists
+        if [ ! -f "sbom-${{ steps.name.outputs.safe }}.cdx.json" ]; then
+          echo "::error::SBOM file not found: sbom-${{ steps.name.outputs.safe }}.cdx.json"
+          exit 1
+        fi
+        
+        echo "Running cosign attest..."
         cosign attest \
           --yes \
           --predicate sbom-${{ steps.name.outputs.safe }}.cdx.json \
           --type cyclonedx \
-          "${{ inputs.image_name }}@${{ inputs.image_digest }}"
-        echo "Cosign attestation completed"
+          "${{ inputs.image_name }}@${{ inputs.image_digest }}" || {
+            echo "::error::Cosign attestation failed with exit code $?"
+            exit 1
+          }
+        
+        echo "✅ Cosign attestation completed successfully"
+        echo "::endgroup::"
 
     - name: Attest build provenance
       uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3.0.0
