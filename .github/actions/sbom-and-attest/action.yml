@@ -96,7 +96,7 @@ runs:
            [[ "$MANIFEST_TYPE" == "application/vnd.docker.distribution.manifest.list.v2+json" ]]; then
           # Multi-platform: attest each platform digest separately
           PLATFORM_DIGESTS=$(crane manifest "$IMAGE_REF" | \
-            jq -r '.manifests[] | select(.annotations."vnd.docker.reference.type" != "attestation-manifest") | .digest')
+            jq -r '.manifests[] | select((.annotations."vnd.docker.reference.type" // "") != "attestation-manifest") | .digest')
           
           for DIGEST in $PLATFORM_DIGESTS; do
             echo "Attesting ${{ inputs.image_name }}@${DIGEST}"
