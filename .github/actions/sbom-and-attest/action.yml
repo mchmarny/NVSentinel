@@ -25,6 +25,10 @@ inputs:
   registry_password:
     description: 'Registry password for authentication'
     required: true
+  crane_version:
+    description: 'Version of crane to install (default: v0.20.2)'
+    required: false
+    default: 'v0.20.2'
 
 runs:
   using: 'composite'
@@ -68,9 +72,8 @@ runs:
       shell: bash
       run: |
         if ! command -v crane &> /dev/null; then
-          echo "Installing crane..."
-          CRANE_VERSION="v0.20.2"
-          curl -sL "https://github.com/google/go-containerregistry/releases/download/${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xz crane
+          echo "Installing crane ${{ inputs.crane_version }}..."
+          curl -sL "https://github.com/google/go-containerregistry/releases/download/${{ inputs.crane_version }}/go-containerregistry_Linux_x86_64.tar.gz" | tar -xz crane
           sudo mv crane /usr/local/bin/crane
           sudo chmod +x /usr/local/bin/crane
         fi
@@ -98,14 +101,14 @@ runs:
           PLATFORM_DIGESTS=$(crane manifest "$IMAGE_REF" | \
             jq -r '.manifests[] | select((.annotations."vnd.docker.reference.type" // "") != "attestation-manifest") | .digest')
           
-          for DIGEST in $PLATFORM_DIGESTS; do
+          while IFS= read -r DIGEST; do
             echo "Attesting ${{ inputs.image_name }}@${DIGEST}"
             cosign attest \
               --yes \
               --predicate "$SBOM_FILE" \
               --type cyclonedx \
               "${{ inputs.image_name }}@${DIGEST}"
-          done
+          done <<< "$PLATFORM_DIGESTS"
         else
           # Single-platform: attest directly
           echo "Attesting $IMAGE_REF"

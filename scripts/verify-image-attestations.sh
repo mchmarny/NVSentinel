@@ -36,6 +36,8 @@
 
 set -euo pipefail
 
+
+
 # Color codes for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -203,22 +205,29 @@ verify_cosign_attestation() {
     media_type=$(echo "$index_manifest" | jq -r '.mediaType')
     
     if [[ "$media_type" == "application/vnd.oci.image.index.v1+json" ]]; then
-        # Get the first attestation manifest digest from the index
-        local att_digest
-        att_digest=$(echo "$index_manifest" | jq -r '.manifests[0].digest')
+        # Get all attestation manifest digests from the index
+        local att_digests
+        att_digests=$(echo "$index_manifest" | jq -r '.manifests[].digest')
         
-        if [ -z "$att_digest" ] || [ "$att_digest" == "null" ]; then
+        if [ -z "$att_digests" ]; then
             return 1
         fi
         
-        # Check the actual attestation manifest for Sigstore bundle
-        local att_manifest
-        att_manifest=$(crane manifest "${image_name}@${att_digest}" 2>/dev/null || echo "")
-        
-        # Verify it contains Sigstore bundle layers
-        if echo "$att_manifest" | jq -e '.layers[].mediaType | select(. == "application/vnd.dev.sigstore.bundle.v0.3+json")' &>/dev/null; then
-            return 0
-        fi
+        # Check if any attestation manifest contains Sigstore bundle
+        # (there may be multiple attestations from different runs)
+        while IFS= read -r att_digest; do
+            if [ -z "$att_digest" ] || [ "$att_digest" == "null" ]; then
+                continue
+            fi
+            
+            local att_manifest
+            att_manifest=$(crane manifest "${image_name}@${att_digest}" 2>/dev/null || echo "")
+            
+            # Verify it contains Sigstore bundle layers
+            if echo "$att_manifest" | jq -e '.layers[].mediaType | select(. == "application/vnd.dev.sigstore.bundle.v0.3+json")' &>/dev/null; then
+                return 0
+            fi
+        done <<< "$att_digests"
     fi
     
     return 1
