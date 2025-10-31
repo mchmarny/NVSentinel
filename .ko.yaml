@@ -15,11 +15,6 @@
 # .ko.yaml in the root of the repository
 defaultBaseImage: cgr.dev/chainguard/static:latest
 platforms: [linux/amd64, linux/arm64]
-
-ldflags:
-  - "-s -w"
-  - "-X main.version={{.Env.VERSION}} -X main.commit={{.Env.GIT_COMMIT}} -X main.date={{.Env.BUILD_DATE}}"
-
 env: [CGO_ENABLED=0]
 
 builds:
@@ -27,6 +22,9 @@ builds:
   - id: fault-quarantine-module
     dir: fault-quarantine-module
     main: .
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{.Env.VERSION}} -X main.commit={{.Env.GIT_COMMIT}} -X main.date={{.Env.BUILD_DATE}}"
     labels:
       org.opencontainers.image.source: "https://github.com/nvidia/nvsentinel"
       org.opencontainers.image.licenses: "Apache-2.0"
@@ -39,6 +37,9 @@ builds:
   - id: fault-remediation-module
     dir: fault-remediation-module
     main: .
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{.Env.VERSION}} -X main.commit={{.Env.GIT_COMMIT}} -X main.date={{.Env.BUILD_DATE}}"
     labels:
       org.opencontainers.image.source: "https://github.com/nvidia/nvsentinel"
       org.opencontainers.image.licenses: "Apache-2.0"
@@ -51,6 +52,9 @@ builds:
   - id: health-events-analyzer
     dir: health-events-analyzer
     main: .
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{.Env.VERSION}} -X main.commit={{.Env.GIT_COMMIT}} -X main.date={{.Env.BUILD_DATE}}"
     labels:
       org.opencontainers.image.source: "https://github.com/nvidia/nvsentinel"
       org.opencontainers.image.licenses: "Apache-2.0"
@@ -63,6 +67,9 @@ builds:
   - id: csp-health-monitor
     dir: health-monitors/csp-health-monitor
     main: ./cmd/csp-health-monitor
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{.Env.VERSION}} -X main.commit={{.Env.GIT_COMMIT}} -X main.date={{.Env.BUILD_DATE}}"
     labels:
       org.opencontainers.image.source: "https://github.com/nvidia/nvsentinel"
       org.opencontainers.image.licenses: "Apache-2.0"
@@ -75,6 +82,9 @@ builds:
   - id: maintenance-notifier
     dir: health-monitors/csp-health-monitor
     main: ./cmd/maintenance-notifier
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{.Env.VERSION}} -X main.commit={{.Env.GIT_COMMIT}} -X main.date={{.Env.BUILD_DATE}}"
     labels:
       org.opencontainers.image.source: "https://github.com/nvidia/nvsentinel"
       org.opencontainers.image.licenses: "Apache-2.0"
@@ -87,6 +97,9 @@ builds:
   - id: labeler-module
     dir: labeler-module
     main: .
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{.Env.VERSION}} -X main.commit={{.Env.GIT_COMMIT}} -X main.date={{.Env.BUILD_DATE}}"
     labels:
       org.opencontainers.image.source: "https://github.com/nvidia/nvsentinel"
       org.opencontainers.image.licenses: "Apache-2.0"
@@ -99,6 +112,9 @@ builds:
   - id: node-drainer-module
     dir: node-drainer-module
     main: .
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{.Env.VERSION}} -X main.commit={{.Env.GIT_COMMIT}} -X main.date={{.Env.BUILD_DATE}}"
     labels:
       org.opencontainers.image.source: "https://github.com/nvidia/nvsentinel"
       org.opencontainers.image.licenses: "Apache-2.0"
@@ -111,6 +127,9 @@ builds:
   - id: janitor
     dir: janitor
     main: .
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{.Env.VERSION}} -X main.commit={{.Env.GIT_COMMIT}} -X main.date={{.Env.BUILD_DATE}}"
     labels:
       org.opencontainers.image.source: "https://github.com/nvidia/nvsentinel"
       org.opencontainers.image.licenses: "Apache-2.0"
@@ -123,6 +142,9 @@ builds:
   - id: platform-connectors
     dir: platform-connectors
     main: .
+    ldflags:
+      - "-s -w"
+      - "-X main.version={{.Env.VERSION}} -X main.commit={{.Env.GIT_COMMIT}} -X main.date={{.Env.BUILD_DATE}}"
     labels:
       org.opencontainers.image.source: "https://github.com/nvidia/nvsentinel"
       org.opencontainers.image.licenses: "Apache-2.0"

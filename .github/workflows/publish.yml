@@ -20,7 +20,6 @@ on:
       - 'v*'
     branches:
       - main
-      - 'pull-request/*'
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
