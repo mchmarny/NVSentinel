@@ -116,6 +116,7 @@ runs:
       if: steps.find-sbom.outcome == 'success'
       env:
         COSIGN_EXPERIMENTAL: "1"
+        COSIGN_REPOSITORY: ${{ inputs.image_name }}
       run: |
         set -euxo pipefail
         
@@ -126,6 +127,7 @@ runs:
         echo "Image: $IMAGE_REF"
         echo "SBOM file: $SBOM_FILE"
         echo "COSIGN_EXPERIMENTAL: ${COSIGN_EXPERIMENTAL}"
+        echo "COSIGN_REPOSITORY: ${COSIGN_REPOSITORY}"
         
         # Verify SBOM file exists
         if [ ! -f "$SBOM_FILE" ]; then
@@ -158,19 +160,35 @@ runs:
           for DIGEST in $PLATFORM_DIGESTS; do
             echo ""
             echo "Attesting platform digest: $DIGEST"
-            cosign attest \
+            if cosign attest \
               --yes \
               --predicate "$SBOM_FILE" \
               --type cyclonedx \
-              "${{ inputs.image_name }}@${DIGEST}"
+              --verbose=9 \
+              "${{ inputs.image_name }}@${DIGEST}" 2>&1 | tee /tmp/cosign-output.log; then
+              echo "✓ Successfully attested $DIGEST"
+              grep -i "pushing\|uploaded\|tlog" /tmp/cosign-output.log || echo "Warning: No upload confirmation in output"
+            else
+              echo "::error::Failed to attest $DIGEST (exit code: $?)"
+              cat /tmp/cosign-output.log
+              exit 1
+            fi
           done
         else
           echo "Single-platform image detected - attesting directly"
-          cosign attest \
+          if cosign attest \
             --yes \
             --predicate "$SBOM_FILE" \
             --type cyclonedx \
-            "$IMAGE_REF"
+            --verbose=9 \
+            "$IMAGE_REF" 2>&1 | tee /tmp/cosign-output.log; then
+            echo "✓ Successfully attested image"
+            grep -i "pushing\|uploaded\|tlog" /tmp/cosign-output.log || echo "Warning: No upload confirmation in output"
+          else
+            echo "::error::Failed to attest image (exit code: $?)"
+            cat /tmp/cosign-output.log
+            exit 1
+          fi
         fi
         
         echo ""
