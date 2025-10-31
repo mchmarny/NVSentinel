@@ -104,18 +104,26 @@ runs:
     - name: Install Cosign
       uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
 
+    - name: Re-authenticate for Cosign
+      uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef  # v3.6.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.registry_password }}
+
     - name: Cosign SBOM attestation
       shell: bash
       if: steps.find-sbom.outcome == 'success'
       env:
         COSIGN_EXPERIMENTAL: "1"
       run: |
-        set -euxo pipefail  # Fail on any error, show commands
+        set -euxo pipefail
         
         echo "::group::Cosign SBOM Attestation"
         SBOM_FILE="${{ steps.find-sbom.outputs.sbom_file }}"
+        IMAGE_REF="${{ inputs.image_name }}@${{ inputs.image_digest }}"
         
-        echo "Image: ${{ inputs.image_name }}@${{ inputs.image_digest }}"
+        echo "Image: $IMAGE_REF"
         echo "SBOM file: $SBOM_FILE"
         echo "COSIGN_EXPERIMENTAL: ${COSIGN_EXPERIMENTAL}"
         
@@ -125,13 +133,47 @@ runs:
           exit 1
         fi
         
-        echo "Running cosign attest..."
-        cosign attest \
-          --yes \
-          --predicate "$SBOM_FILE" \
-          --type cyclonedx \
-          "${{ inputs.image_name }}@${{ inputs.image_digest }}"
+        # Check if this is a multi-platform image (OCI index)
+        MANIFEST_TYPE=$(crane manifest "$IMAGE_REF" | jq -r '.mediaType // "unknown"')
+        echo "Manifest type: $MANIFEST_TYPE"
         
+        if [[ "$MANIFEST_TYPE" == "application/vnd.oci.image.index.v1+json" ]] || \
+           [[ "$MANIFEST_TYPE" == "application/vnd.docker.distribution.manifest.list.v2+json" ]]; then
+          echo "Multi-platform image detected - attesting each platform digest"
+          
+          # Extract platform-specific digests
+          PLATFORM_DIGESTS=$(crane manifest "$IMAGE_REF" | \
+            jq -r '.manifests[] | select(.annotations."vnd.docker.reference.type" != "attestation-manifest") | .digest' | \
+            grep -v "^$")
+          
+          if [ -z "$PLATFORM_DIGESTS" ]; then
+            echo "::error::No platform digests found in multi-platform manifest"
+            exit 1
+          fi
+          
+          echo "Found platform digests:"
+          echo "$PLATFORM_DIGESTS"
+          
+          # Attest each platform digest
+          for DIGEST in $PLATFORM_DIGESTS; do
+            echo ""
+            echo "Attesting platform digest: $DIGEST"
+            cosign attest \
+              --yes \
+              --predicate "$SBOM_FILE" \
+              --type cyclonedx \
+              "${{ inputs.image_name }}@${DIGEST}"
+          done
+        else
+          echo "Single-platform image detected - attesting directly"
+          cosign attest \
+            --yes \
+            --predicate "$SBOM_FILE" \
+            --type cyclonedx \
+            "$IMAGE_REF"
+        fi
+        
+        echo ""
         echo "✅ Cosign attestation completed successfully"
         echo "::endgroup::"
 
