@@ -93,6 +93,11 @@ jobs:
   build-images-docker:
     runs-on: linux-amd64-cpu32
     timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     strategy:
       matrix:
         include:
