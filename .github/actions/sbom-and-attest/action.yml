@@ -58,12 +58,16 @@ runs:
 
     - name: Cosign SBOM attestation
       shell: bash
+      env:
+        COSIGN_EXPERIMENTAL: "1"
       run: |
+        echo "Attesting SBOM for ${{ inputs.image_name }}@${{ inputs.image_digest }}"
         cosign attest \
           --yes \
           --predicate sbom-${{ steps.name.outputs.safe }}.cdx.json \
           --type cyclonedx \
           "${{ inputs.image_name }}@${{ inputs.image_digest }}"
+        echo "Cosign attestation completed"
 
     - name: Attest build provenance
       uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3.0.0
