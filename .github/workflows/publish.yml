@@ -70,7 +70,7 @@ jobs:
             echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            echo "value=${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "value=${{ github.ref_name }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
           fi
 
       - name: Build image list
@@ -134,7 +134,7 @@ jobs:
             echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            echo "value=${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "value=${{ github.ref_name }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
           fi
 
       - name: Publish container for ${{ matrix.component }}
@@ -180,7 +180,7 @@ jobs:
             echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            echo "value=${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "value=${{ github.ref_name }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
           fi
 
       # ko is already installed in the setup-ci-env action
@@ -264,7 +264,7 @@ jobs:
             echo "value=${{ github.ref_name }}" >> $GITHUB_OUTPUT
           else
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            echo "value=${SHORT_SHA}" >> $GITHUB_OUTPUT
+            echo "value=${{ github.ref_name }}-${SHORT_SHA}" >> $GITHUB_OUTPUT
           fi
 
       - name: Prep system for multi-node Kind cluster
