@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# verify-image-attestations.sh
+# check-image-attestations.sh
 #
 # Validates SBOM attestations for all NVSentinel container images built with a specific tag.
 # This script checks both Ko-built images (Go services) and Docker-built images (Python services).
@@ -25,9 +25,9 @@
 #   Verification uses `crane` to check for sha256-prefixed attestation tags in the registry.
 #
 # Usage:
-#   ./scripts/verify-image-attestations.sh <tag>
-#   ./scripts/verify-image-attestations.sh v1.2.3
-#   ./scripts/verify-image-attestations.sh 3b37e68
+#   ./scripts/check-image-attestations.sh <tag>
+#   ./scripts/check-image-attestations.sh v1.2.3
+#   ./scripts/check-image-attestations.sh 3b37e68
 #
 # Requirements:
 #   - crane (for manifest inspection and OCI 1.1 attestation detection)
