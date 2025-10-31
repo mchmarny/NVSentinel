@@ -189,10 +189,11 @@ jobs:
           VERSION: ${{ steps.ref-name.outputs.value }}
         run: scripts/buildko.sh
 
-  attest:
+  attest-and-sbom-ko:
     needs: build-images-ko
     runs-on: linux-amd64-cpu32
     permissions:
+      contents: read
       packages: write
       id-token: write
       attestations: write
@@ -200,69 +201,17 @@ jobs:
       matrix:
         image: ${{ fromJson(needs.build-images-ko.outputs.images) }}
     steps:
-      - name: Authenticate to GHCR
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef  # v3.6.0
+      - name: Checkout Code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
 
-      - name: Attest build provenance
-        id: attest
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a  # v3.0.0
+      - name: Generate SBOM and Attest
+        uses: ./.github/actions/sbom-and-attest
         with:
-          subject-name: ${{ matrix.image.name }}
-          subject-digest: ${{ matrix.image.digest }}
-          push-to-registry: true
-
-  sbom-ko:
-    needs: build-images-ko
-    runs-on: linux-amd64-cpu32
-    permissions:
-      contents: read
-      id-token: write         # required for Cosign keyless signing
-      packages: write         # needed to push attestations to GHCR
-      security-events: write  # only needed if you also upload SARIF somewhere
-    strategy:
-      matrix:
-        image: ${{ fromJson(needs.build-images-ko.outputs.images) }}
-    steps:
-      - name: Authenticate to GHCR
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef  # v3.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Derive safe filename
-        id: name
-        shell: bash
-        run: |
-          IMAGE="${{ matrix.image.name }}"
-          SAFE="$(basename "${IMAGE%%:*}")"  # strip tag if present, then basename
-          echo "safe=$SAFE" >> "$GITHUB_OUTPUT"
-
-      - name: Generate SBOM
-        uses: anchore/sbom-action@8e94d75ddd33f69f691467e42275782e4bfefe84  # v0.20.9
-        with:
-          image: "${{ matrix.image.name }}@${{ matrix.image.digest }}"
-          format: cyclonedx-json
-          output-file: sbom-${{ steps.name.outputs.safe }}.cdx.json
-          upload-artifact: true          # also uploads to the workflow run
-          upload-release-assets: auto    # 'auto' == assets on tags
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
-
-      - name: Cosign SBOM attestation
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-        run: |
-          cosign attest \
-            --yes \
-            --predicate sbom-${{ steps.name.outputs.safe }}.cdx.json \
-            --type cyclonedx \
-            "${{ matrix.image.name }}@${{ matrix.image.digest }}"
+          image_name: ${{ matrix.image.name }}
+          image_digest: ${{ matrix.image.digest }}
+          registry_password: ${{ secrets.GITHUB_TOKEN }}
 
   e2e-test:
     name: "E2E Test Published Images"
@@ -271,8 +220,7 @@ jobs:
     needs:
       - build-images-docker
       - build-images-ko
-      - attest
-      - sbom-ko
+      - attest-and-sbom-ko
     env:
       CLUSTER_NAME: 'nvsentinel-uat'
       FAKE_GPU_NODE_COUNT: '10'
