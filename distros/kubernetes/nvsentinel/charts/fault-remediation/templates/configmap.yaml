@@ -11,13 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: fault-remediation-templates
+  name: {{ include "fault-remediation.fullname" . }}
   labels:
-    {{- include "fault-remediation-module.labels" . | nindent 4 }}
+    {{- include "fault-remediation.labels" . | nindent 4 }}
 data:
+  config.toml: |
+    {{ .Values.config | nindent 6 }}
   {{ .Values.maintenanceResource.template.fileName }}: |
     {{- .Files.Get "files/maintenance.yaml" | nindent 4 }}
   {{ if .Values.logCollector.enabled }}

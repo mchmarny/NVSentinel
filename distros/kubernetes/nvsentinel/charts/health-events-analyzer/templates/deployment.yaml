@@ -25,7 +25,7 @@ spec:
       {{- include "health-events-analyzer.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with (.Values.global.podAnnotations | default .Values.podAnnotations) }}
+      {{- with .Values.podAnnotations }}
       annotations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
@@ -36,16 +36,15 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "health-events-analyzer.serviceAccountName" . }}
+      serviceAccountName: {{ include "health-events-analyzer.fullname" . }}
       containers:
         - name: health-events-analyzer
-          image: "{{ .Values.global.healthEventsAnalyzer.image.repository }}:{{ .Values.global.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.global.healthEventsAnalyzer.image.pullPolicy }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default ((.Values.global).image).tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           args:
           - "--metrics-port={{ .Values.global.metricsPort }}"
-          - "--mongo-client-cert-mount-path={{ .Values.clientCertMountPath }}"
           ports:
             - name: metrics
               containerPort: {{ .Values.global.metricsPort }}
@@ -66,19 +65,25 @@ spec:
             timeoutSeconds: 3
             failureThreshold: 3
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            runAsUser: 0
           volumeMounts:
           - name: config-volume
             mountPath: /etc/config/config.toml
             subPath: config.toml
           - name: mongo-app-client-cert
-            mountPath: {{ .Values.clientCertMountPath }}
+            mountPath: /etc/ssl/mongo-client
             readOnly: true
           - name: var-run-vol
             mountPath: /var/run/
           env:
             - name: LOG_LEVEL
               value: "{{ .Values.logLevel }}"
+            - name: MONGODB_CLIENT_CERT_PATH
+              value: "/etc/ssl/mongo-client/tls.crt"
+            - name: MONGODB_CLIENT_KEY_PATH
+              value: "/etc/ssl/mongo-client/tls.key"
+            - name: MONGODB_CA_CERT_PATH
+              value: "/etc/ssl/mongo-client/ca.crt"
           envFrom:
             - configMapRef:
                 name: mongodb-config

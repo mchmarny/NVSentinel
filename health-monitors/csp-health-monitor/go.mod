@@ -13,7 +13,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/health v1.34.8
 	github.com/nvidia/nvsentinel/commons v0.0.0
 	github.com/nvidia/nvsentinel/data-models v0.0.0
-	github.com/nvidia/nvsentinel/store-client-sdk v0.0.0
+	github.com/nvidia/nvsentinel/store-client v0.0.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
 	go.mongodb.org/mongo-driver v1.17.4
@@ -48,6 +48,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.38.9 // indirect
 	github.com/aws/smithy-go v1.23.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/caarlos0/env/v11 v11.3.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
@@ -127,6 +128,6 @@ require (
 // Local replacements for internal modules
 replace github.com/nvidia/nvsentinel/data-models => ../../data-models
 
-replace github.com/nvidia/nvsentinel/store-client-sdk => ../../store-client-sdk
+replace github.com/nvidia/nvsentinel/store-client => ../../store-client
 
 replace github.com/nvidia/nvsentinel/commons => ../../commons
