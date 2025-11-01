@@ -54,6 +54,61 @@ type TerminateNodeReconciler struct {
 	CSPClient model.CSPClient
 }
 
+// updateTerminateNodeStatus is a helper function that handles status updates with proper error handling.
+// It centralizes the status update logic to avoid code duplication and provides consistent handling
+// of status updates across different code paths in the reconciliation loop.
+//
+//nolint:dupl // Similar to updateRebootNodeStatus but operates on TerminateNode type
+func (r *TerminateNodeReconciler) updateTerminateNodeStatus(
+	ctx context.Context,
+	req ctrl.Request,
+	original *janitordgxcnvidiacomv1alpha1.TerminateNode,
+	updated *janitordgxcnvidiacomv1alpha1.TerminateNode,
+	result ctrl.Result,
+) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Compare status to see if anything changed, and push updates if needed
+	// Note: This status update pattern is safe for single-replica deployments because only
+	// a single controller instance (single writer) modifies the TerminateNode status, so there
+	// are no concurrent modifications and no risk of update conflicts.
+	// If janitor is deployed with multiple replicas (multi-replica), concurrent status updates
+	// may occur, leading to update conflicts and possible lost updates. In that case, you must:
+	//   - Use retry.RetryOnConflict to handle update conflicts from the API server.
+	//   - Consider merging status changes or using a conflict-aware update strategy to avoid
+	//     overwriting concurrent updates.
+	// See: https://book.kubebuilder.io/reference/using-finalizers.html#handling-conflicts
+	// and controller-runtime docs for best practices.
+	if !reflect.DeepEqual(original.Status, updated.Status) {
+		// Refresh the object before updating to avoid precondition failures
+		var freshTerminateNode janitordgxcnvidiacomv1alpha1.TerminateNode
+		if err := r.Get(ctx, req.NamespacedName, &freshTerminateNode); err != nil {
+			if apierrors.IsNotFound(err) {
+				logger.V(0).Info("post-reconciliation status update: object not found, assumed deleted",
+					"name", updated.Name)
+				return ctrl.Result{}, nil
+			}
+			logger.Error(err, "failed to refresh TerminateNode before status update")
+			return ctrl.Result{}, err
+		}
+
+		// Apply status changes to the fresh object
+		freshTerminateNode.Status = updated.Status
+
+		if err := r.Status().Update(ctx, &freshTerminateNode); err != nil {
+			logger.Error(err, "failed to update terminatenode status",
+				"node", updated.Spec.NodeName)
+			return ctrl.Result{}, err
+		}
+		logger.Info("terminatenode status updated",
+			"node", updated.Spec.NodeName,
+			"retryCount", int(updated.Status.RetryCount),
+			"consecutiveFailures", int(updated.Status.ConsecutiveFailures))
+	}
+
+	return result, nil
+}
+
 // +kubebuilder:rbac:groups=janitor.dgxc.nvidia.com,resources=terminatenodes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=janitor.dgxc.nvidia.com,resources=terminatenodes/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=janitor.dgxc.nvidia.com,resources=terminatenodes/finalizers,verbs=update
@@ -321,7 +376,8 @@ func (r *TerminateNodeReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 					delay := getNextRequeueDelay(terminateNode.Status.ConsecutiveFailures)
 
 					result = ctrl.Result{RequeueAfter: delay}
-					goto UpdateStatus
+					// Update status and return early
+					return r.updateTerminateNodeStatus(ctx, req, originalTerminateNode, &terminateNode, result)
 				}
 
 				// Update status based on terminate result
@@ -359,46 +415,8 @@ func (r *TerminateNodeReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 
-UpdateStatus:
-	// Compare status to see if anything changed, and push updates if needed
-	// Note: This status update pattern is safe for single-replica deployments because only
-	// a single controller instance (single writer) modifies the TerminateNode status, so there
-	// are no concurrent modifications and no risk of update conflicts.
-	// If janitor is deployed with multiple replicas (multi-replica), concurrent status updates
-	// may occur, leading to update conflicts and possible lost updates. In that case, you must:
-	//   - Use retry.RetryOnConflict to handle update conflicts from the API server.
-	//   - Consider merging status changes or using a conflict-aware update strategy to avoid
-	//     overwriting concurrent updates.
-	// See: https://book.kubebuilder.io/reference/using-finalizers.html#handling-conflicts
-	// and controller-runtime docs for best practices.
-	if !reflect.DeepEqual(originalTerminateNode.Status, terminateNode.Status) {
-		// Refresh the object before updating to avoid precondition failures
-		var freshTerminateNode janitordgxcnvidiacomv1alpha1.TerminateNode
-		if err := r.Get(ctx, req.NamespacedName, &freshTerminateNode); err != nil {
-			if apierrors.IsNotFound(err) {
-				logger.V(0).Info("post-reconciliation status update: object not found, assumed deleted",
-					"name", terminateNode.Name)
-				return ctrl.Result{}, nil
-			}
-			logger.Error(err, "failed to refresh TerminateNode before status update")
-			return ctrl.Result{}, err
-		}
-
-		// Apply status changes to the fresh object
-		freshTerminateNode.Status = terminateNode.Status
-
-		if err := r.Status().Update(ctx, &freshTerminateNode); err != nil {
-			logger.Error(err, "failed to update terminatenode status",
-				"node", terminateNode.Spec.NodeName)
-			return ctrl.Result{}, err
-		}
-		logger.Info("terminatenode status updated",
-			"node", terminateNode.Spec.NodeName,
-			"retryCount", int(terminateNode.Status.RetryCount),
-			"consecutiveFailures", int(terminateNode.Status.ConsecutiveFailures))
-	}
-
-	return result, nil
+	// Update status at the end of reconciliation
+	return r.updateTerminateNodeStatus(ctx, req, originalTerminateNode, &terminateNode, result)
 }
 
 // isNodeNotReady returns true if the node is not in Ready state

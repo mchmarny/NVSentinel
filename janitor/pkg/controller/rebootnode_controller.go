@@ -71,9 +71,11 @@ func getNextRequeueDelay(consecutiveFailures int32) time.Duration {
 	return delays[idx]
 }
 
-// updateRebootNodeStatus updates the RebootNode status if it has changed.
-// It refreshes the object before updating to avoid precondition failures.
-// Returns the result and any error encountered.
+// updateRebootNodeStatus is a helper function that handles status updates with proper error handling.
+// It centralizes the status update logic to avoid code duplication and provides consistent handling
+// of status updates across different code paths in the reconciliation loop.
+//
+//nolint:dupl // Similar to updateTerminateNodeStatus but operates on RebootNode type
 func (r *RebootNodeReconciler) updateRebootNodeStatus(
 	ctx context.Context,
 	req ctrl.Request,
