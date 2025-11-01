@@ -64,6 +64,7 @@ type TerminateNodeStatus struct {
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="Force",type="boolean",JSONPath=".spec.force"
+//nolint:lll // kubebuilder printcolumn marker
 // +kubebuilder:printcolumn:name="NodeTerminated",type="string",JSONPath=".status.conditions[?(@.type=='NodeTerminated')].status"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 

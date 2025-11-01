@@ -25,6 +25,7 @@ import (
 type GPUSelector struct {
 	// UUIDs is a list of GPU UUIDs.
 	// +optional
+	//nolint:lll // kubebuilder validation pattern
 	// +kubebuilder:validation:items:Pattern="^GPU-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 	UUIDs []string `json:"uuids,omitempty"`
 
@@ -69,6 +70,7 @@ const (
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:subresource:status
+//nolint:lll // kubebuilder printcolumn marker
 // +kubebuilder:printcolumn:name="Node",type="string",JSONPath=".spec.nodeName",description="The target node for the GPU reset"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
