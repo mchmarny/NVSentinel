@@ -43,7 +43,7 @@ type Provider string
 func New(ctx context.Context) (model.CSPClient, error) {
 	logger := log.FromContext(ctx)
 
-	provider, err := GetProvideFromEnv()
+	provider, err := GetProviderFromEnv()
 	if err != nil {
 		logger.Error(err, "failed to determine CSP provider from environment")
 
@@ -85,8 +85,8 @@ func NewWithProvider(ctx context.Context, provider Provider) (model.CSPClient, e
 	}
 }
 
-// GetProvideFromEnv retrieves the CSP provider from environment variables
-func GetProvideFromEnv() (Provider, error) {
+// GetProviderFromEnv retrieves the CSP provider from environment variables
+func GetProviderFromEnv() (Provider, error) {
 	cspType := os.Getenv("CSP")
 	if cspType == "" {
 		cspType = string(ProviderKind)

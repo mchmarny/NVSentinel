@@ -361,9 +361,16 @@ func (r *TerminateNodeReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 UpdateStatus:
 	// Compare status to see if anything changed, and push updates if needed
-	// Note: This status update pattern is safe for single-replica deployments where only
-	// this controller modifies the status. If janitor becomes multi-replica, this should
-	// use retry.RetryOnConflict to handle concurrent updates.
+	// Note: This status update pattern is safe for single-replica deployments because only
+	// a single controller instance (single writer) modifies the TerminateNode status, so there
+	// are no concurrent modifications and no risk of update conflicts.
+	// If janitor is deployed with multiple replicas (multi-replica), concurrent status updates
+	// may occur, leading to update conflicts and possible lost updates. In that case, you must:
+	//   - Use retry.RetryOnConflict to handle update conflicts from the API server.
+	//   - Consider merging status changes or using a conflict-aware update strategy to avoid
+	//     overwriting concurrent updates.
+	// See: https://book.kubebuilder.io/reference/using-finalizers.html#handling-conflicts
+	// and controller-runtime docs for best practices.
 	if !reflect.DeepEqual(originalTerminateNode.Status, terminateNode.Status) {
 		// Refresh the object before updating to avoid precondition failures
 		var freshTerminateNode janitordgxcnvidiacomv1alpha1.TerminateNode
@@ -427,6 +434,10 @@ func (r *TerminateNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return fmt.Errorf("failed to create CSP client: %w", err)
 	}
 
+	// Note: We use RequeueAfter in the reconcile loop rather than the controller's
+	// rate limiter because we need per-resource (per-node) backoff based on each
+	// node's individual failure count, not per-controller rate limiting.
+	// This allows nodes with consecutive failures to back off independently.
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&janitordgxcnvidiacomv1alpha1.TerminateNode{}).
 		Named("terminatenode").

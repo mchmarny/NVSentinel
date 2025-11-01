@@ -43,7 +43,7 @@ func TestProvider_String(t *testing.T) {
 	}
 }
 
-func TestGetProvideFromEnv_Valid(t *testing.T) {
+func TestGetProviderFromEnv_Valid(t *testing.T) {
 	// Save original env var
 	originalCSP := os.Getenv("CSP")
 	defer func() {
@@ -73,14 +73,14 @@ func TestGetProvideFromEnv_Valid(t *testing.T) {
 			require.NoError(t, err)
 
 			// Get provider
-			provider, err := GetProvideFromEnv()
+			provider, err := GetProviderFromEnv()
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, provider)
 		})
 	}
 }
 
-func TestGetProvideFromEnv_Invalid(t *testing.T) {
+func TestGetProviderFromEnv_Invalid(t *testing.T) {
 	// Save original env var
 	originalCSP := os.Getenv("CSP")
 	defer func() {
@@ -113,7 +113,7 @@ func TestGetProvideFromEnv_Invalid(t *testing.T) {
 			}
 
 			// Get provider
-			provider, err := GetProvideFromEnv()
+			provider, err := GetProviderFromEnv()
 			if tt.expectDefault {
 				// Empty CSP defaults to kind
 				require.NoError(t, err)
