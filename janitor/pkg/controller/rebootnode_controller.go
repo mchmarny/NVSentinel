@@ -99,7 +99,8 @@ func (r *RebootNodeReconciler) updateRebootNodeStatus(
 		var freshRebootNode janitordgxcnvidiacomv1alpha1.RebootNode
 		if err := r.Get(ctx, req.NamespacedName, &freshRebootNode); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.V(0).Info("Post-reconciliation status update:", updated.Name, "not found, object assumed deleted")
+				logger.V(0).Info("post-reconciliation status update: object not found, assumed deleted",
+					"name", updated.Name)
 				return ctrl.Result{}, nil
 			}
 			logger.Error(err, "failed to refresh RebootNode before status update")

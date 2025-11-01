@@ -61,15 +61,12 @@ spec:
                     description: |-
                       PCIBusIDs is a list of GPU PCI bus IDs.
                       Format: "domain:bus:device.function" (e.g., "0000:01:00.0").
-                      nolint:lll
                     items:
                       pattern: ^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]{1}$
                       type: string
                     type: array
                   uuids:
-                    description: |-
-                      UUIDs is a list of GPU UUIDs.
-                      nolint:lll
+                    description: UUIDs is a list of GPU UUIDs.
                     items:
                       pattern: ^GPU-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
                       type: string

@@ -376,7 +376,7 @@ UpdateStatus:
 		var freshTerminateNode janitordgxcnvidiacomv1alpha1.TerminateNode
 		if err := r.Get(ctx, req.NamespacedName, &freshTerminateNode); err != nil {
 			if apierrors.IsNotFound(err) {
-				logger.V(0).Info("Post-reconciliation status update: TerminateNode not found, object assumed deleted",
+				logger.V(0).Info("post-reconciliation status update: object not found, assumed deleted",
 					"name", terminateNode.Name)
 				return ctrl.Result{}, nil
 			}
