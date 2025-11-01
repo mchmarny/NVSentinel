@@ -49,6 +49,14 @@ type RebootNodeStatus struct {
 	// CompletionTime is the time when the reboot was completed
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 
+	// RetryCount tracks the number of reconciliation attempts for this reboot operation
+	// Used to implement maximum retry limits to prevent indefinite reconciliation
+	RetryCount int32 `json:"retryCount,omitempty"`
+
+	// ConsecutiveFailures tracks consecutive CSP operation failures for exponential backoff
+	// Reset to 0 on successful operations
+	ConsecutiveFailures int32 `json:"consecutiveFailures,omitempty"`
+
 	// Conditions represent the latest available observations of an object's current state.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

@@ -17,8 +17,8 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"time"
 
@@ -28,20 +28,52 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	janitordgxcnvidiacomv1alpha1 "github.com/nvidia/nvsentinel/janitor/api/v1alpha1"
 	"github.com/nvidia/nvsentinel/janitor/pkg/config"
 	"github.com/nvidia/nvsentinel/janitor/pkg/csp"
 	"github.com/nvidia/nvsentinel/janitor/pkg/metrics"
+	"github.com/nvidia/nvsentinel/janitor/pkg/model"
 )
+
+const (
+	// RebootNodeFinalizer is added to RebootNode objects to handle cleanup
+	RebootNodeFinalizer = "janitor.dgxc.nvidia.com/rebootnode-finalizer"
+
+	// CSPOperationTimeout is the maximum time allowed for a single CSP operation
+	CSPOperationTimeout = 2 * time.Minute
+
+	// MaxRebootRetries is the maximum number of retry attempts before giving up
+	MaxRebootRetries = 20 // 10 minutes at 30s base intervals
+)
+
+// getNextRequeueDelay calculates exponential backoff delay based on consecutive failures
+// Returns: 30s, 1m, 2m, 5m (capped)
+func getNextRequeueDelay(consecutiveFailures int32) time.Duration {
+	delays := []time.Duration{
+		30 * time.Second,
+		1 * time.Minute,
+		2 * time.Minute,
+		5 * time.Minute,
+	}
+
+	// Safely convert int32 to int for array indexing
+	idx := int(consecutiveFailures)
+	if idx >= len(delays) {
+		return delays[len(delays)-1] // Cap at maximum
+	}
+
+	return delays[idx]
+}
 
 // RebootNodeReconciler reconciles a RebootNode object
 type RebootNodeReconciler struct {
 	client.Client
 	Scheme    *runtime.Scheme
 	Config    *config.RebootNodeControllerConfig
-	CSPClient csp.Client
+	CSPClient model.CSPClient
 }
 
 // +kubebuilder:rbac:groups=janitor.dgxc.nvidia.com,resources=rebootnodes,verbs=get;list;watch;create;update;patch;delete
@@ -60,8 +92,36 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// Handle deletion with finalizer
+	if !rebootNode.DeletionTimestamp.IsZero() {
+		if controllerutil.ContainsFinalizer(&rebootNode, RebootNodeFinalizer) {
+			logger.Info("rebootnode deletion requested, performing cleanup",
+				"node", rebootNode.Spec.NodeName,
+				"conditions", rebootNode.Status.Conditions,
+				"cspRef", rebootNode.GetCSPReqRef())
+
+			// Best effort: log the state for audit trail
+			// Future enhancement: Could add CSP cancellation API call here if available
+
+			controllerutil.RemoveFinalizer(&rebootNode, RebootNodeFinalizer)
+			if err := r.Update(ctx, &rebootNode); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Add finalizer if not present
+	if !controllerutil.ContainsFinalizer(&rebootNode, RebootNodeFinalizer) {
+		controllerutil.AddFinalizer(&rebootNode, RebootNodeFinalizer)
+		if err := r.Update(ctx, &rebootNode); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	if rebootNode.Status.CompletionTime != nil {
-		logger.V(1).Info("RebootNode has completion time set, skipping reconcile", "node", rebootNode.Spec.NodeName)
+		logger.V(1).Info("rebootnode has completion time set, skipping reconcile",
+			"node", rebootNode.Spec.NodeName)
 		return ctrl.Result{}, nil
 	}
 
@@ -75,6 +135,46 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Set the start time if it is not already set
 	rebootNode.SetStartTime()
 
+	// Check if max retries exceeded
+	if rebootNode.Status.RetryCount >= MaxRebootRetries {
+		logger.Info("max retries exceeded, marking as failed",
+			"node", rebootNode.Spec.NodeName,
+			"retries", int(rebootNode.Status.RetryCount),
+			"maxRetries", MaxRebootRetries)
+
+		rebootNode.SetCompletionTime()
+		rebootNode.SetCondition(metav1.Condition{
+			Type:   janitordgxcnvidiacomv1alpha1.RebootNodeConditionNodeReady,
+			Status: metav1.ConditionFalse,
+			Reason: "MaxRetriesExceeded",
+			Message: fmt.Sprintf("Node failed to reach ready state after %d retries over %s",
+				MaxRebootRetries, r.getRebootTimeout()),
+			LastTransitionTime: metav1.Now(),
+		})
+
+		metrics.GlobalMetrics.IncActionCount(metrics.ActionTypeReboot, metrics.StatusFailed, rebootNode.Spec.NodeName)
+
+		result = ctrl.Result{} // Don't requeue
+
+		// Update status and return
+		if !reflect.DeepEqual(originalRebootNode.Status, rebootNode.Status) {
+			var freshRebootNode janitordgxcnvidiacomv1alpha1.RebootNode
+			if err := r.Get(ctx, req.NamespacedName, &freshRebootNode); err != nil {
+				if apierrors.IsNotFound(err) {
+					return ctrl.Result{}, nil
+				}
+				return ctrl.Result{}, err
+			}
+
+			freshRebootNode.Status = rebootNode.Status
+			if err := r.Status().Update(ctx, &freshRebootNode); err != nil {
+				logger.Error(err, "failed to update status after max retries")
+				return ctrl.Result{}, err
+			}
+		}
+		return result, nil
+	}
+
 	// Get the node to reboot
 	var node corev1.Node
 	if err := r.Get(ctx, client.ObjectKey{Name: rebootNode.Spec.NodeName}, &node); err != nil {
@@ -83,6 +183,9 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Check if reboot has already started
 	if rebootNode.IsRebootInProgress() {
+		// Increment retry count for monitoring attempts
+		rebootNode.Status.RetryCount++
+
 		// Check if csp reports the node is ready
 		cspReady := false
 		var nodeReadyErr error
@@ -90,7 +193,26 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			cspReady = true
 			nodeReadyErr = nil
 		} else {
-			cspReady, nodeReadyErr = r.CSPClient.IsNodeReady(ctx, node, rebootNode.GetCSPReqRef())
+			// Add timeout to CSP operation to prevent queue blocking
+			cspCtx, cancel := context.WithTimeout(ctx, CSPOperationTimeout)
+			defer cancel()
+
+			cspReady, nodeReadyErr = r.CSPClient.IsNodeReady(cspCtx, node, rebootNode.GetCSPReqRef())
+
+			// Check for timeout specifically
+			if errors.Is(nodeReadyErr, context.DeadlineExceeded) {
+				logger.Info("CSP operation timed out, will retry",
+					"node", node.Name,
+					"operation", "IsNodeReady",
+					"timeout", CSPOperationTimeout)
+
+				rebootNode.Status.ConsecutiveFailures++
+				delay := getNextRequeueDelay(rebootNode.Status.ConsecutiveFailures)
+
+				result = ctrl.Result{RequeueAfter: delay}
+				// Skip to status update at end
+				goto UpdateStatus
+			}
 		}
 
 		// Check if kubernetes reports the node is ready.
@@ -103,7 +225,10 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		// nolint:gocritic // Migrated business logic with if-else chain
 		if nodeReadyErr != nil {
-			logger.Error(nodeReadyErr, fmt.Sprintf("Node %s ready status check failed", node.Name))
+			logger.Error(nodeReadyErr, "node ready status check failed",
+				"node", node.Name)
+
+			rebootNode.Status.ConsecutiveFailures++
 
 			rebootNode.SetCompletionTime()
 			rebootNode.SetCondition(metav1.Condition{
@@ -117,7 +242,12 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			metrics.GlobalMetrics.IncActionCount(metrics.ActionTypeReboot, metrics.StatusFailed, node.Name)
 			result = ctrl.Result{} // Don't requeue on failure
 		} else if cspReady && kubernetesReady {
-			logger.V(0).Info(fmt.Sprintf("Node reached ready state post-reboot: %s", node.Name))
+			logger.Info("node reached ready state post-reboot",
+				"node", node.Name,
+				"duration", time.Since(rebootNode.Status.StartTime.Time))
+
+			// Reset failure counters on success
+			rebootNode.Status.ConsecutiveFailures = 0
 
 			// Update status
 			rebootNode.SetCompletionTime()
@@ -134,7 +264,10 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			metrics.GlobalMetrics.RecordActionMTTR(metrics.ActionTypeReboot, time.Since(rebootNode.Status.StartTime.Time))
 			result = ctrl.Result{} // Don't requeue on success
 		} else if time.Since(rebootNode.Status.StartTime.Time) > r.getRebootTimeout() {
-			logger.Error(nil, fmt.Sprintf("Node %s reboot timed out after %s", node.Name, r.getRebootTimeout()))
+			logger.Error(nil, "node reboot timed out",
+				"node", node.Name,
+				"timeout", r.getRebootTimeout(),
+				"elapsed", time.Since(rebootNode.Status.StartTime.Time))
 
 			// Update status
 			rebootNode.SetCompletionTime()
@@ -150,7 +283,9 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			result = ctrl.Result{} // Don't requeue on timeout
 		} else {
 			// Still waiting for reboot to complete
-			result = ctrl.Result{RequeueAfter: 30 * time.Second}
+			// Use exponential backoff if there have been failures
+			delay := getNextRequeueDelay(rebootNode.Status.ConsecutiveFailures)
+			result = ctrl.Result{RequeueAfter: delay}
 		}
 	} else {
 		// Check if signal was already sent (but reboot not in progress due to other issues)
@@ -164,8 +299,11 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		if signalAlreadySent {
 			// Signal was already sent, just continue monitoring
-			logger.V(1).Info(fmt.Sprintf("Reboot signal already sent for node %s, continuing monitoring", node.Name))
-			result = ctrl.Result{RequeueAfter: 30 * time.Second}
+			logger.V(1).Info("reboot signal already sent, continuing monitoring",
+				"node", node.Name)
+
+			delay := getNextRequeueDelay(rebootNode.Status.ConsecutiveFailures)
+			result = ctrl.Result{RequeueAfter: delay}
 		} else {
 			if r.Config.ManualMode {
 				isManualModeConditionSet := false
@@ -186,17 +324,41 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					})
 					metrics.GlobalMetrics.IncActionCount(metrics.ActionTypeReboot, metrics.StatusStarted, node.Name)
 				}
-				logger.V(0).Info(fmt.Sprintf("Manual mode enabled, janitor will not send reboot signal for node %s", node.Name))
+				logger.Info("manual mode enabled, janitor will not send reboot signal",
+					"node", node.Name)
 				result = ctrl.Result{}
 			} else {
 				// Start the reboot process
 				metrics.GlobalMetrics.IncActionCount(metrics.ActionTypeReboot, metrics.StatusStarted, node.Name)
-				logger.V(0).Info(fmt.Sprintf("Sending reboot signal to node %s", node.Name))
-				reqRef, rebootErr := r.CSPClient.SendRebootSignal(ctx, node)
+				logger.Info("sending reboot signal to node",
+					"node", node.Name)
+
+				// Add timeout to CSP operation
+				cspCtx, cancel := context.WithTimeout(ctx, CSPOperationTimeout)
+				defer cancel()
+
+				reqRef, rebootErr := r.CSPClient.SendRebootSignal(cspCtx, node)
+
+				// Check for timeout
+				if errors.Is(rebootErr, context.DeadlineExceeded) {
+					logger.Info("CSP operation timed out, will retry",
+						"node", node.Name,
+						"operation", "SendRebootSignal",
+						"timeout", CSPOperationTimeout)
+
+					rebootNode.Status.ConsecutiveFailures++
+					delay := getNextRequeueDelay(rebootNode.Status.ConsecutiveFailures)
+
+					result = ctrl.Result{RequeueAfter: delay}
+					goto UpdateStatus
+				}
 
 				// Update status based on reboot result
 				var signalSentCondition metav1.Condition
 				if rebootErr == nil {
+					// Reset consecutive failures on success
+					rebootNode.Status.ConsecutiveFailures = 0
+
 					signalSentCondition = metav1.Condition{
 						Type:               janitordgxcnvidiacomv1alpha1.RebootNodeConditionSignalSent,
 						Status:             metav1.ConditionTrue,
@@ -207,6 +369,8 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 					// Continue monitoring if signal was sent successfully
 					result = ctrl.Result{RequeueAfter: 30 * time.Second}
 				} else {
+					rebootNode.Status.ConsecutiveFailures++
+
 					signalSentCondition = metav1.Condition{
 						Type:               janitordgxcnvidiacomv1alpha1.RebootNodeConditionSignalSent,
 						Status:             metav1.ConditionFalse,
@@ -224,7 +388,11 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
+UpdateStatus:
 	// Compare status to see if anything changed, and push updates if needed
+	// Note: This status update pattern is safe for single-replica deployments where only
+	// this controller modifies the status. If janitor becomes multi-replica, this should
+	// use retry.RetryOnConflict to handle concurrent updates.
 	if !reflect.DeepEqual(originalRebootNode.Status, rebootNode.Status) {
 		// Refresh the object before updating to avoid precondition failures
 		var freshRebootNode janitordgxcnvidiacomv1alpha1.RebootNode
@@ -241,10 +409,14 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		freshRebootNode.Status = rebootNode.Status
 
 		if err := r.Status().Update(ctx, &freshRebootNode); err != nil {
-			logger.Error(err, "failed to update RebootNode status")
+			logger.Error(err, "failed to update rebootnode status",
+				"node", rebootNode.Spec.NodeName)
 			return ctrl.Result{}, err
 		}
-		logger.V(0).Info("RebootNode status updated", "node", rebootNode.Spec.NodeName)
+		logger.Info("rebootnode status updated",
+			"node", rebootNode.Spec.NodeName,
+			"retryCount", int(rebootNode.Status.RetryCount),
+			"consecutiveFailures", int(rebootNode.Status.ConsecutiveFailures))
 	}
 
 	return result, nil
@@ -252,18 +424,16 @@ func (r *RebootNodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *RebootNodeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Get CSP client from environment variable, default to "kind" for development
-	cspType := os.Getenv("CSP")
-	if cspType == "" {
-		cspType = "kind" // Default to kind for local development
-	}
+	// Use background context for client initialization during controller setup
+	// This is synchronous and happens before the controller starts processing events
+	ctx := context.Background()
 
-	cspClient, err := csp.NewClient(cspType)
+	var err error
+
+	r.CSPClient, err = csp.New(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create CSP client: %w", err)
 	}
-
-	r.CSPClient = cspClient
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&janitordgxcnvidiacomv1alpha1.RebootNode{}).

@@ -32,19 +32,19 @@ import (
 
 	janitordgxcnvidiacomv1alpha1 "github.com/nvidia/nvsentinel/janitor/api/v1alpha1"
 	"github.com/nvidia/nvsentinel/janitor/pkg/config"
-	"github.com/nvidia/nvsentinel/janitor/pkg/csp"
+	"github.com/nvidia/nvsentinel/janitor/pkg/model"
 )
 
 // Mock CSP client for testing
 type mockCSPClient struct {
 	sendRebootSignalCalled int
 	sendRebootSignalError  error
-	sendRebootSignalResult csp.ResetSignalRequestRef
+	sendRebootSignalResult model.ResetSignalRequestRef
 	isNodeReadyResult      bool
 	isNodeReadyError       error
 }
 
-func (m *mockCSPClient) SendRebootSignal(ctx context.Context, node corev1.Node) (csp.ResetSignalRequestRef, error) {
+func (m *mockCSPClient) SendRebootSignal(ctx context.Context, node corev1.Node) (model.ResetSignalRequestRef, error) {
 	m.sendRebootSignalCalled++
 	return m.sendRebootSignalResult, m.sendRebootSignalError
 }
@@ -53,8 +53,8 @@ func (m *mockCSPClient) IsNodeReady(ctx context.Context, node corev1.Node, reqRe
 	return m.isNodeReadyResult, m.isNodeReadyError
 }
 
-func (m *mockCSPClient) SendTerminateSignal(ctx context.Context, node corev1.Node) (csp.TerminateNodeRequestRef, error) {
-	return "", nil
+func (m *mockCSPClient) SendTerminateSignal(ctx context.Context, node corev1.Node) (model.TerminateNodeRequestRef, error) {
+	return model.TerminateNodeRequestRef(""), nil
 }
 
 func TestRebootNodeReconciler_getRebootTimeout(t *testing.T) {
@@ -152,7 +152,7 @@ var _ = Describe("RebootNode Controller", func() {
 
 		// Create mock CSP client
 		mockCSP = &mockCSPClient{
-			sendRebootSignalResult: csp.ResetSignalRequestRef("test-request-ref"),
+			sendRebootSignalResult: model.ResetSignalRequestRef("test-request-ref"),
 		}
 
 		// Create reconciler
