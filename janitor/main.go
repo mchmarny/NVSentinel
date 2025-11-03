@@ -18,7 +18,9 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -148,11 +150,21 @@ func run() error {
 		"terminateNode.timeout", cfg.TerminateNode.Timeout,
 		"global.manualMode", cfg.Global.ManualMode)
 
-	// Parse config port
-	configPort, err := strconv.Atoi(configAddr[1:]) // Remove leading ':'
+	// Parse config port from address
+	// Handles formats like ":8082", "localhost:8082", "0.0.0.0:8082"
+	_, portStr, err := net.SplitHostPort(configAddr)
 	if err != nil {
-		slog.Error("Invalid config-bind-address port", "error", err)
-		return err
+		// If SplitHostPort fails, assume it's just a port number
+		portStr = configAddr
+		if portStr != "" && portStr[0] == ':' {
+			portStr = portStr[1:]
+		}
+	}
+
+	configPort, err := strconv.Atoi(portStr)
+	if err != nil {
+		slog.Error("Invalid config-bind-address port", "error", err, "address", configAddr)
+		return fmt.Errorf("invalid config-bind-address port %q: %w", configAddr, err)
 	}
 
 	// Create config handler
@@ -340,25 +352,13 @@ func run() error {
 	// Start config server
 	g.Go(func() error {
 		slog.Info("Starting config server", "port", configPort)
-
-		if err := configServer.Serve(gCtx); err != nil {
-			slog.Error("Config server failed", "error", err)
-			return err
-		}
-
-		return nil
+		return configServer.Serve(gCtx)
 	})
 
 	// Start controller manager
 	g.Go(func() error {
 		slog.Info("Starting manager")
-
-		if err := mgr.Start(gCtx); err != nil {
-			slog.Error("Problem running manager", "error", err)
-			return err
-		}
-
-		return nil
+		return mgr.Start(gCtx)
 	})
 
 	// Wait for both to complete
