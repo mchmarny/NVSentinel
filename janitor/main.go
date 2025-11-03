@@ -22,9 +22,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/errgroup"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -37,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/nvidia/nvsentinel/commons/pkg/logger"
+	"github.com/nvidia/nvsentinel/commons/pkg/server"
 	janitordgxcnvidiacomv1alpha1 "github.com/nvidia/nvsentinel/janitor/api/v1alpha1"
 	"github.com/nvidia/nvsentinel/janitor/pkg/config"
 	"github.com/nvidia/nvsentinel/janitor/pkg/controller"
@@ -145,27 +148,31 @@ func run() error {
 		"terminateNode.timeout", cfg.TerminateNode.Timeout,
 		"global.manualMode", cfg.Global.ManualMode)
 
-	// Start a simple HTTP server for the /config endpoint
-	go func() {
-		mux := http.NewServeMux()
-		mux.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
+	// Parse config port
+	configPort, err := strconv.Atoi(configAddr[1:]) // Remove leading ':'
+	if err != nil {
+		slog.Error("Invalid config-bind-address port", "error", err)
+		return err
+	}
 
-			if err := json.NewEncoder(w).Encode(cfg); err != nil {
-				slog.Error("Failed to encode configuration as JSON", "error", err)
-				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	// Create config handler
+	configHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 
-				return
-			}
-		})
+		if err := json.NewEncoder(w).Encode(cfg); err != nil {
+			slog.Error("Failed to encode configuration as JSON", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 
-		slog.Info("Starting config HTTP server", "address", configAddr)
-
-		// nolint:gosec // G114: Config endpoint is for internal debugging/monitoring
-		if err := http.ListenAndServe(configAddr, mux); err != nil {
-			slog.Error("Config HTTP server failed", "error", err)
+			return
 		}
-	}()
+	})
+
+	// Create config server using common server implementation
+	configServer := server.NewServer(
+		server.WithPort(configPort),
+		server.WithHandler("/config", configHandler),
+		server.WithSimpleHealth(),
+	)
 
 	// Setup TLS options
 	var tlsOpts []func(*tls.Config)
@@ -324,10 +331,38 @@ func run() error {
 		return err
 	}
 
-	slog.Info("Starting manager")
+	// Setup signal handler for graceful shutdown
+	ctx := ctrl.SetupSignalHandler()
 
-	if err = mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		slog.Error("Problem running manager", "error", err)
+	// Use errgroup to manage both the config server and controller manager
+	g, gCtx := errgroup.WithContext(ctx)
+
+	// Start config server
+	g.Go(func() error {
+		slog.Info("Starting config server", "port", configPort)
+
+		if err := configServer.Serve(gCtx); err != nil {
+			slog.Error("Config server failed", "error", err)
+			return err
+		}
+
+		return nil
+	})
+
+	// Start controller manager
+	g.Go(func() error {
+		slog.Info("Starting manager")
+
+		if err := mgr.Start(gCtx); err != nil {
+			slog.Error("Problem running manager", "error", err)
+			return err
+		}
+
+		return nil
+	})
+
+	// Wait for both to complete
+	if err := g.Wait(); err != nil {
 		return err
 	}
 
