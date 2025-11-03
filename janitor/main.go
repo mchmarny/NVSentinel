@@ -180,10 +180,10 @@ func run() error {
 	})
 
 	// Create config server using common server implementation
+	// Note: Health checks are handled by controller-runtime manager on probeAddr
 	configServer := server.NewServer(
 		server.WithPort(configPort),
 		server.WithHandler("/config", configHandler),
-		server.WithSimpleHealth(),
 	)
 
 	// Setup TLS options
