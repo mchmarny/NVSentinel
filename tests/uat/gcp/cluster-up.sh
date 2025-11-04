@@ -36,6 +36,7 @@ fi
 # Create regional cluster
 echo "Creating GKE cluster..."
 gcloud container clusters create "$CLUSTER_NAME" \
+    --cluster-version "$CLUSTER_VERSION" \
     --scopes=cloud-platform \
     --disk-size="200" \
     --disk-type="pd-standard" \
@@ -54,13 +55,31 @@ gcloud container clusters create "$CLUSTER_NAME" \
     --release-channel="$CLUSTER_CHANNEL" \
     --workload-metadata="GKE_METADATA" \
     --workload-pool="${PROJECT_ID}.svc.id.goog" \
-    --addons=HttpLoadBalancing,HorizontalPodAutoscaling
+    --addons=HttpLoadBalancing,HorizontalPodAutoscaling,GcePersistentDiskCsiDriver
 
 # Get cluster version 
 echo "Cluster version:"
 gcloud container clusters describe "$CLUSTER_NAME" \
     --region="$REGION" \
     --format="value(currentMasterVersion)"
+
+# Add GPU node pool if specified
+# TODO: Add capacity reservation for GPUs
+if [[ "$GPU_NODE_COUNT" -gt 0 ]]; then
+    echo "Adding GPU node pool..."
+    gcloud container node-pools create gpu-pool \
+        --cluster="$CLUSTER_NAME" \
+        --region="$REGION" \
+        --disk-type "pd-balanced" \
+        --disk-size "100" \
+        --ephemeral-storage-local-ssd \
+        --machine-type="$GPU_NODE_TYPE" \
+        --num-nodes="$GPU_NODE_COUNT" \
+        --accelerator="type=nvidia-h100-mega-80gb,count=8" \
+        --scopes=cloud-platform \
+        --enable-autorepair \
+        --workload-metadata="GKE_METADATA"
+fi
 
 # Install Auth Plugin
 gcloud components install kubectl --quiet
