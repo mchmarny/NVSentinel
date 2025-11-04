@@ -39,9 +39,11 @@ jobs:
       SERVICE_ACCOUNT: "github-actions-user@proj-dgxc-nvsentinel.iam.gserviceaccount.com"
       PROJECT_ID: "proj-dgxc-nvsentinel"
     steps:
+      # Checkout Repo
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
+      # Configure GCP AuthN
       - name: Get AuthN Token
         id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3
@@ -50,21 +52,13 @@ jobs:
           workload_identity_provider: ${{ env.IDENTITY_PROVIDER }}
           service_account: ${{ env.SERVICE_ACCOUNT }}
 
+      # Copy Images to GCP Artifact Registry
       - name: Authenticate to GCP Artifact Registry
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef  # v3.6.0
         with:
           registry: ${{ env.TARGET_REG }}
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }} 
-
-      - name: Setup gcloud CLI
-        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
-        with:
-          version: '>= 543.0.0'
-
-      - name: Show gcloud CLI Info
-        run: |
-          gcloud info
 
       - name: Install crane
         shell: bash
@@ -90,7 +84,7 @@ jobs:
         env:
           CI_COMMIT_REF_NAME: ${{ env.IMAGE_TAG }}
         run: |
-          ./scripts/build-image-list.sh
+          scripts/build-image-list.sh
           cat versions.txt
 
       - name: Copy Images to GCP Artifact Registry
@@ -98,4 +92,28 @@ jobs:
         env:
           TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
         run: |
-          ./scripts/copy-images.sh "$TARGET_REG" versions.txt
+          scripts/copy-images.sh "$TARGET_REG" versions.txt
+
+      # Create GKE Cluster
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
+        with:
+          version: '>= 543.0.0'
+
+      - name: Show gcloud CLI Info
+        run: |
+          gcloud info
+
+      - name: Create Cluster
+        shell: bash
+        env:
+          TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
+        run: |
+          scripts/gcp-cluster-up.sh
+
+      - name: Destroy Cluster
+        shell: bash
+        env:
+          TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
+        run: |
+          scripts/gcp-cluster-down.sh
