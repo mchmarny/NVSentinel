@@ -62,6 +62,10 @@ gcloud container clusters describe "$CLUSTER_NAME" \
     --region="$REGION" \
     --format="value(currentMasterVersion)"
 
+# Install Auth Plugin
+gcloud components install kubectl --quiet
+gcloud components install gke-gcloud-auth-plugin --quiet
+
 # Create policy binding between service account and k8s service account (optional)
 if [[ -n "${SERVICE_ACCOUNT}" ]]; then
     echo "Creating IAM policy binding for service account..."
