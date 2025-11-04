@@ -434,3 +434,6 @@ health-monitors/syslog-health-monitor/syslog-health-monitor
 labeler/labeler
 node-drainer/node-drainer
 platform-connectors/platform-connectors
+
+# Ignore generated credentials from google-github-actions/auth
+gha-creds-*.json
