@@ -60,12 +60,12 @@ if [ -z "$TARGET_REG_URI" ]; then
     log_error "Usage: $0 <target-registry-uri> [image-list-file]"
     log_error "Example: $0 us-docker.pkg.dev/my-project/my-repo versions.txt"
     exit 1
-}
+fi
 
 if [ ! -f "$IMAGE_LIST_FILE" ]; then
     log_error "Image list file not found: $IMAGE_LIST_FILE"
     exit 1
-}
+fi
 
 # Info
 log_info "Source image list: $IMAGE_LIST_FILE"
