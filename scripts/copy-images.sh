@@ -50,10 +50,10 @@ command_exists() {
 }
 
 # Validate prerequisites
-command_exists crane || {
+if ! command_exists crane; then
     log_error "crane is not installed. Please install crane to proceed."
     exit 1
-}
+fi
 
 # Validate arguments
 if [ -z "$TARGET_REG_URI" ]; then
