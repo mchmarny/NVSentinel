@@ -24,9 +24,17 @@ DIR="$(dirname "$0")"
 # - gcloud is installed and configured
 # - OIDC configured (see https://github.com/mchmarny/oidc-for-gcp-using-terraform)
 
-echo "Creating GKE cluster..."
+
+# Check if default network exists, create if missing
+echo "Checking for VPC network..."
+if ! gcloud compute networks describe default --format="value(name)" >/dev/null 2>&1; then
+    echo "Creating default VPC network..."
+    gcloud compute networks create default --subnet-mode=auto
+    echo "✅ Default network created"
+fi
 
 # Create regional cluster
+echo "Creating GKE cluster..."
 gcloud container clusters create "$CLUSTER_NAME" \
     --scopes=cloud-platform \
     --disk-size="200" \
@@ -60,8 +68,6 @@ if [[ -n "${SERVICE_ACCOUNT}" ]]; then
     gcloud iam service-accounts add-iam-policy-binding "${SERVICE_ACCOUNT}" \
         --member="serviceAccount:${PROJECT_ID}.svc.id.goog[cnrm-system/cnrm-controller-manager]" \
         --role="roles/iam.workloadIdentityUser"
-else
-    echo "SERVICE_ACCOUNT not set, skipping IAM policy binding"
 fi
 
 # Get cluster credentials
