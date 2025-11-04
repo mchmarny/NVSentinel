@@ -16,9 +16,10 @@ name: Integration Tests - GCP
 
 on:
   workflow_dispatch: {}  # allow manual runs for testing
-  pull_request:  # add itself for testing changes to this workflow
-    paths:
-      - '.github/workflows/integration-gcp.yml'
+  push:
+    branches:
+      - main
+      - feature/oidc-gcp
 
 permissions:
   contents: read
