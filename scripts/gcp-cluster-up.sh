@@ -31,8 +31,6 @@ gcloud container clusters create "$CLUSTER_NAME" \
     --scopes=cloud-platform \
     --disk-size="200" \
     --disk-type="pd-standard" \
-    --enable-cloud-logging \
-    --enable-cloud-monitoring \
     --enable-image-streaming \
     --enable-ip-alias \
     --enable-shielded-nodes \
