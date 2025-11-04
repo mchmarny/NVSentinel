@@ -4,10 +4,11 @@ locals {
     "roles/artifactregistry.writer",
     "roles/cloudkms.signerVerifier",
     "roles/cloudkms.viewer",
+    "roles/compute.networkAdmin",
     "roles/container.clusterAdmin",
+    "roles/iam.serviceAccountAdmin",
     "roles/storage.objectCreator",
     "roles/storage.objectViewer",
-    "roles/compute.networkAdmin"
   ])
 }
 

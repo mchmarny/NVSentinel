@@ -41,11 +41,16 @@ if [[ -z "${REGION}" ]]; then
   export REGION="us-central1"
 fi
 
+# If variable CLUSTER_SUFFIX is not set, default to timestamp
+export CLUSTER_NAME_SUFFIX="${CLUSTER_NAME_SUFFIX:-$(date +%s)}"
+
 # Config
-export CLUSTER_NAME="${CLUSTER_NAME:-validation}"
+export CLUSTER_NAME="${CLUSTER_NAME:-validation-${CLUSTER_NAME_SUFFIX}}"
 export CLUSTER_CHANNEL="${CLUSTER_CHANNEL:-regular}"
 export SYSTEM_NODE_TYPE="${SYSTEM_NODE_TYPE:-e2-standard-4}"
 export SYSTEM_NODE_COUNT="${SYSTEM_NODE_COUNT:-3}"
+
+
 
 # SERVICE_ACCOUNT is optional - set by workflow or provide manually
 export SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-}"

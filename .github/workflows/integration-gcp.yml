@@ -103,6 +103,7 @@ jobs:
         shell: bash
         env:
           TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
+          CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
         run: tests/uat/gcp/cluster-up.sh
 
       # TODO: Add integration tests here that use the cluster
@@ -111,5 +112,5 @@ jobs:
         if: always() && steps.create-cluster.outcome != 'skipped'
         shell: bash
         env:
-          TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
+          CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
         run: tests/uat/gcp/cluster-down.sh
