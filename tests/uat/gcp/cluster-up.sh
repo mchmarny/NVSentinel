@@ -18,7 +18,7 @@
 set -euo pipefail
 
 DIR="$(dirname "$0")"
-. "${DIR}/gcp-cluster-env.sh"
+. "${DIR}/cluster-env.sh"
 
 # Assumptions:
 # - gcloud is installed and configured

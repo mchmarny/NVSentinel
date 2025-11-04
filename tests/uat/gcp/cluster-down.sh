@@ -18,7 +18,7 @@
 set -euo pipefail
 
 DIR="$(dirname "$0")"
-. "${DIR}/gcp-cluster-env.sh"
+. "${DIR}/cluster-env.sh"
 
 echo "Deleting GKE cluster: $CLUSTER_NAME in region $REGION"
 

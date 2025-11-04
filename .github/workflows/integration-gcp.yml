@@ -72,27 +72,22 @@ jobs:
           crane version
 
       - name: Auth crane Source
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | crane auth login ghcr.io --username=${{ github.actor }} --password-stdin
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | crane auth login ghcr.io --username=${{ github.actor }} --password-stdin
 
       - name: Auth crane Target
-        run: |
-          echo "${{ steps.auth.outputs.access_token }}" | crane auth login ${{ env.TARGET_REG }} --username=oauth2accesstoken --password-stdin
+        run: echo "${{ steps.auth.outputs.access_token }}" | crane auth login ${{ env.TARGET_REG }} --username=oauth2accesstoken --password-stdin
 
       - name: Build Image List
         shell: bash
         env:
           CI_COMMIT_REF_NAME: ${{ env.IMAGE_TAG }}
-        run: |
-          scripts/build-image-list.sh
-          cat versions.txt
+        run: scripts/build-image-list.sh
 
       - name: Copy Images to GCP Artifact Registry
         shell: bash
         env:
           TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
-        run: |
-          scripts/copy-images.sh "$TARGET_REG" versions.txt
+        run: scripts/copy-images.sh "$TARGET_REG" versions.txt
 
       # Create GKE Cluster
       - name: Setup gcloud CLI
@@ -101,16 +96,14 @@ jobs:
           version: '>= 543.0.0'
 
       - name: Show gcloud CLI Info
-        run: |
-          gcloud info
+        run: gcloud info
 
       - name: Create Cluster
         id: create-cluster
         shell: bash
         env:
           TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
-        run: |
-          scripts/gcp-cluster-up.sh
+        run: tests/uat/gcp/cluster-up.sh
 
       # TODO: Add integration tests here that use the cluster
 
@@ -119,5 +112,4 @@ jobs:
         shell: bash
         env:
           TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
-        run: |
-          scripts/gcp-cluster-down.sh
+        run: tests/uat/gcp/cluster-down.sh
