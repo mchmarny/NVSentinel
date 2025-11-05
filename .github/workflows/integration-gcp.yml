@@ -71,7 +71,9 @@ jobs:
           CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
           REGION: ${{ env.REGION }}
           GPU_NODE_ZONE: ${{ env.GPU_NODE_ZONE }}
-        run: tests/uat/gcp/cluster-up.sh
+        run: |
+          tests/uat/gcp/cluster-up.sh
+          tests/uat/gcp/cluster-pool.sh
 
       # Test
       - name: Install NVS
