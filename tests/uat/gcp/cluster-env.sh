@@ -53,6 +53,7 @@ export SYSTEM_NODE_COUNT="${SYSTEM_NODE_COUNT:-3}"
 export GPU_NODE_TYPE="${GPU_NODE_TYPE:-a4-highgpu-8g}"
 export GPU_NODE_COUNT="${GPU_NODE_COUNT:-0}"
 export GPU_NODE_ACCELERATOR="${GPU_NODE_ACCELERATOR:-type=nvidia-h100-mega-80gb,count=8}"
+export GPU_NODE_CAPACITY_RESERVATION="${GPU_NODE_CAPACITY_RESERVATION:-}"
 
 # SERVICE_ACCOUNT is optional - set by workflow or provide manually
 export SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-}"

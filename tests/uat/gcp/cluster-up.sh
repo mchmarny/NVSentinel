@@ -76,6 +76,7 @@ if [[ "$GPU_NODE_COUNT" -gt 0 ]]; then
         --machine-type="$GPU_NODE_TYPE" \
         --num-nodes="$GPU_NODE_COUNT" \
         --accelerator="type=nvidia-h100-mega-80gb,count=8" \
+        --reservation="$GPU_NODE_CAPACITY_RESERVATION" \
         --scopes=cloud-platform \
         --enable-autorepair \
         --workload-metadata="GKE_METADATA"
@@ -93,8 +94,12 @@ if [[ -n "${SERVICE_ACCOUNT}" ]]; then
         --role="roles/iam.workloadIdentityUser"
 fi
 
-# Get cluster credentials
-echo "Getting cluster credentials..."
+# Add cluster admin role to current user
+CURRENT_ACCOUNT=$(gcloud config get-value account)
+echo "Binding cluster-admin role to current user: $CURRENT_ACCOUNT"
 gcloud container clusters get-credentials "$CLUSTER_NAME" --region="$REGION"
+kubectl create clusterrolebinding "cluster-admin-binding-${CURRENT_ACCOUNT}" \
+    --clusterrole=cluster-admin \
+    --user="$CURRENT_ACCOUNT"
 
 echo "✅ Cluster creation complete!"

@@ -38,6 +38,7 @@ jobs:
       IDENTITY_PROVIDER: "projects/1015254933832/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
       SERVICE_ACCOUNT: "github-actions-user@nv-dgxck8s-20250306.iam.gserviceaccount.com"
       PROJECT_ID: "nv-dgxck8s-20250306"
+      CAPACITY_RESERVATION: "projects/nv-dgxcloudprodgsc-20240206/reservations/gsc-a3-megagpu-8g-shared-res-2"
 
     steps:
       # Checkout
@@ -64,6 +65,7 @@ jobs:
         shell: bash
         env:
           TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
+          GPU_NODE_CAPACITY_RESERVATION: "${{ env.CAPACITY_RESERVATION }}"
           CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
         run: tests/uat/gcp/cluster-up.sh
 
