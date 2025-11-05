@@ -86,20 +86,4 @@ fi
 gcloud components install kubectl --quiet
 gcloud components install gke-gcloud-auth-plugin --quiet
 
-# Create policy binding between service account and k8s service account (optional)
-if [[ -n "${SERVICE_ACCOUNT}" ]]; then
-    echo "Creating IAM policy binding for service account..."
-    gcloud iam service-accounts add-iam-policy-binding "${SERVICE_ACCOUNT}" \
-        --member="serviceAccount:${PROJECT_ID}.svc.id.goog[cnrm-system/cnrm-controller-manager]" \
-        --role="roles/iam.workloadIdentityUser"
-fi
-
-# Add cluster admin role to current user
-CURRENT_ACCOUNT=$(gcloud config get-value account)
-echo "Binding cluster-admin role to current user: $CURRENT_ACCOUNT"
-gcloud container clusters get-credentials "$CLUSTER_NAME" --region="$REGION"
-kubectl create clusterrolebinding "cluster-admin-binding-${CURRENT_ACCOUNT}" \
-    --clusterrole=cluster-admin \
-    --user="$CURRENT_ACCOUNT"
-
 echo "✅ Cluster creation complete!"

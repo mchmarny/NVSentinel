@@ -57,6 +57,7 @@ export GPU_NODE_CAPACITY_RESERVATION="${GPU_NODE_CAPACITY_RESERVATION:-}"
 
 # SERVICE_ACCOUNT is optional - set by workflow or provide manually
 export SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-}"
+export CURRENT_ACCOUNT=$(gcloud config get-value account)
 
 # Print variables
 cat << EOF
@@ -65,6 +66,7 @@ Configuration:
   PROJECT_ID:           ${PROJECT_ID}
   REGION:               ${REGION}
   SERVICE_ACCOUNT:      ${SERVICE_ACCOUNT}
+  CURRENT_ACCOUNT:      ${CURRENT_ACCOUNT}
 
   CLUSTER_NAME:         ${CLUSTER_NAME}
   CLUSTER_VERSION:      ${CLUSTER_VERSION}
