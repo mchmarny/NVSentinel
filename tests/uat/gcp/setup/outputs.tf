@@ -14,13 +14,3 @@ output "IDENTITY_PROVIDER" {
   value       = google_iam_workload_identity_pool_provider.github_provider.name
   description = "Provider ID to use in Auth action for GCP in GitHub."
 }
-
-output "ARTIFACT_REGISTRY" {
-  value       = google_artifact_registry_repository.registry.name
-  description = "Artifact Registry name."
-}
-
-output "REGISTRY_LOCATION" {
-  value       = google_artifact_registry_repository.registry.location
-  description = "Artifact Registry location."
-}

@@ -39,11 +39,11 @@ jobs:
       SERVICE_ACCOUNT: "github-actions-user@proj-dgxc-nvsentinel.iam.gserviceaccount.com"
       PROJECT_ID: "proj-dgxc-nvsentinel"
     steps:
-      # Checkout Repo
+      # Checkout
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
 
-      # Configure GCP AuthN
+      # Auth
       - name: Get AuthN Token
         id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093  # v3
@@ -52,51 +52,11 @@ jobs:
           workload_identity_provider: ${{ env.IDENTITY_PROVIDER }}
           service_account: ${{ env.SERVICE_ACCOUNT }}
 
-      # Copy Images to GCP Artifact Registry
-      - name: Authenticate to GCP Artifact Registry
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef  # v3.6.0
-        with:
-          registry: ${{ env.TARGET_REG }}
-          username: oauth2accesstoken
-          password: ${{ steps.auth.outputs.access_token }} 
-
-      - name: Install crane
-        shell: bash
-        env:
-          CRANE_VERSION: ${{ env.CRANE_VERSION }}
-          REPO_URL: "https://github.com/google/go-containerregistry"
-        run: |
-          set -euo pipefail
-          URL="$REPO_URL/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
-          curl -sSL "$URL" | sudo tar -xz -C /usr/local/bin crane
-          crane version
-
-      - name: Auth crane Source
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | crane auth login ghcr.io --username=${{ github.actor }} --password-stdin
-
-      - name: Auth crane Target
-        run: echo "${{ steps.auth.outputs.access_token }}" | crane auth login ${{ env.TARGET_REG }} --username=oauth2accesstoken --password-stdin
-
-      - name: Build Image List
-        shell: bash
-        env:
-          CI_COMMIT_REF_NAME: ${{ env.IMAGE_TAG }}
-        run: scripts/build-image-list.sh
-
-      - name: Copy Images to GCP Artifact Registry
-        shell: bash
-        env:
-          TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
-        run: scripts/copy-images.sh "$TARGET_REG" versions.txt
-
-      # Create GKE Cluster
+      # Cluster
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
         with:
           version: '>= 543.0.0'
-
-      - name: Show gcloud CLI Info
-        run: gcloud info
 
       - name: Create Cluster
         id: create-cluster
@@ -106,8 +66,16 @@ jobs:
           CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
         run: tests/uat/gcp/cluster-up.sh
 
-      # TODO: Add integration tests here that use the cluster
+      # Test
+      - name: Install NVS
+        shell: bash
+        run: tests/uat/install-apps.sh
 
+      - name: Run UAT Tests
+        shell: bash
+        run: tests/uat/tests.sh
+
+      # Teardown
       - name: Destroy Cluster
         if: always() && steps.create-cluster.outcome != 'skipped'
         shell: bash
