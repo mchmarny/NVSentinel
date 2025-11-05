@@ -255,7 +255,7 @@ install_nvsentinel() {
         "--values" "$NVSENTINEL_VALUES"
     )
     
-    # Add ARM64-specific values if on ARM architecture
+    # # Add ARM64-specific values if on ARM architecture
     if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
         if [[ -f "$NVSENTINEL_ARM64_VALUES" ]]; then
             log "Using ARM64-specific values: $NVSENTINEL_ARM64_VALUES"
@@ -290,10 +290,6 @@ main() {
     log "  - Prometheus Operator: $PROMETHEUS_OPERATOR_VERSION"
     log "  - GPU Operator: $GPU_OPERATOR_VERSION"
     log "  - cert-manager: $CERT_MANAGER_VERSION"
-    
-    if [[ "$ARCH" == "arm64" ]] || [[ "$ARCH" == "aarch64" ]]; then
-        log "ARM64 architecture detected - using compatible image overrides for MongoDB"
-    fi
     
     install_prometheus_operator
     install_cert_manager
