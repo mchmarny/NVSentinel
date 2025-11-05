@@ -45,14 +45,14 @@ fi
 export CLUSTER_NAME_SUFFIX="${CLUSTER_NAME_SUFFIX:-$(date +%s)}"
 
 # Config
-export CLUSTER_VERSION="${CLUSTER_VERSION:-'1.33.5-gke.1162000'}"
+export CLUSTER_VERSION="${CLUSTER_VERSION:-1.33.5-gke.1162000}"
 export CLUSTER_NAME="${CLUSTER_NAME:-validation-${CLUSTER_NAME_SUFFIX}}"
-export CLUSTER_CHANNEL="${CLUSTER_CHANNEL:-'regular'}"
-export SYSTEM_NODE_TYPE="${SYSTEM_NODE_TYPE:-'e2-standard-4'}"
+export CLUSTER_CHANNEL="${CLUSTER_CHANNEL:-regular}"
+export SYSTEM_NODE_TYPE="${SYSTEM_NODE_TYPE:-e2-standard-4}"
 export SYSTEM_NODE_COUNT="${SYSTEM_NODE_COUNT:-3}"
-export GPU_NODE_TYPE="${GPU_NODE_TYPE:-'a4-highgpu-8g'}"
-export GPU_NODE_COUNT="${GPU_NODE_COUNT:-'0'}"
-export GPU_NODE_ACCELERATOR="${GPU_NODE_ACCELERATOR:-'type=nvidia-h100-mega-80gb,count=8'}"
+export GPU_NODE_TYPE="${GPU_NODE_TYPE:-a4-highgpu-8g}"
+export GPU_NODE_COUNT="${GPU_NODE_COUNT:-0}"
+export GPU_NODE_ACCELERATOR="${GPU_NODE_ACCELERATOR:-type=nvidia-h100-mega-80gb,count=8}"
 
 # SERVICE_ACCOUNT is optional - set by workflow or provide manually
 export SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-}"
