@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      IMAGE_TAG: main-ddc3fc4
+      IMAGE_TAG: main-27ca26d
       TARGET_REG: us-docker.pkg.dev
       TARGET_REPO: nvsentinel
       CRANE_VERSION: "0.20.6"
@@ -74,6 +74,7 @@ jobs:
         shell: bash
         env: 
           CSP: "gcp"
+          NVSENTINEL_VERSION: ${{ env.IMAGE_TAG }}
         run: tests/uat/install-apps.sh
 
       - name: Run UAT Tests
