@@ -31,25 +31,32 @@ if [[ "$GPU_NODE_COUNT" -gt 0 ]]; then
     echo "Adding GPU node pool..."
     
     # Base command for GPU instances
-    # Note: A3/A4 instances have 8x H100-80GB GPUs pre-attached
+    # Note: A3 instances have 8x H100-80GB GPUs pre-attached
     # DO NOT use --accelerator flag - GPUs are part of the machine type
     # --node-locations specifies the zone(s) where nodes will be created (must match capacity reservation zone)
+    # --placement-type=COMPACT required for A3 instances with PERIODIC maintenance
+    # --service-account must match the working pool's service account
     CMD=(
         gcloud container node-pools create gpu-pool
             --cluster="$CLUSTER_NAME"
             --region="$REGION"
             --node-locations="$GPU_NODE_ZONE"
             --machine-type="$GPU_NODE_TYPE"
+            --service-account="$SERVICE_ACCOUNT"
+            --disk-type=pd-ssd
+            --disk-size=200
+            --local-nvme-ssd-block=count=16
             --image-type="COS_CONTAINERD"
             --num-nodes="$GPU_NODE_COUNT"
-            --scopes="https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/dataaccessauditlogging"
+            --scopes="https://www.googleapis.com/auth/cloud-platform"
             --workload-metadata=GKE_METADATA
             --enable-gvnic
             --node-taints="dedicated=user-workload:NoExecute"
-            --node-labels="nodeGroup=customer-gpu,dedicated=user-workload,gke-no-default-nvidia-gpu-device-plugin=true"
+            --node-labels="nodeGroup=customer-gpu,dedicated=user-workload,gke-no-default-nvidia-gpu-device-plugin=true,env=non-prod"
             --tags="customer-gpu,customer-node"
             --shielded-secure-boot
             --shielded-integrity-monitoring
+            --placement-type=COMPACT
     )
     
     # Add capacity reservation only if specified

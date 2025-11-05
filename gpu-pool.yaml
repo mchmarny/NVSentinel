@@ -1,0 +1,91 @@
+conditions:
+- canonicalCode: FAILED_PRECONDITION
+  message: "[CONDITION_NOT_MET]: Instance 'gke-validation-19118545691-gpu-pool-0137f1a7-77t8'\
+    \ creation failed: Operation denied by org policy: [customConstraints/custom.RestrictA4]\
+    \ : Prevent A4 Launches"
+- canonicalCode: FAILED_PRECONDITION
+  message: "Not all instances running in IGM after 15.86277883s. Expected 1, running\
+    \ 0, transitioning 1. Current errors: [CONDITION_NOT_MET]: Instance 'gke-validation-19118545691-gpu-pool-0137f1a7-77t8'\
+    \ creation failed: Operation denied by org policy: [customConstraints/custom.RestrictA4]\
+    \ : Prevent A4 Launches."
+config:
+  accelerators:
+  - acceleratorCount: '8'
+    acceleratorType: nvidia-b200
+    gpuDriverInstallationConfig:
+      gpuDriverVersion: DEFAULT
+  bootDisk:
+    diskType: hyperdisk-balanced
+    sizeGb: '100'
+  diskSizeGb: 100
+  diskType: hyperdisk-balanced
+  effectiveCgroupMode: EFFECTIVE_CGROUP_MODE_V2
+  ephemeralStorageLocalSsdConfig:
+    localSsdCount: 32
+  gvnic:
+    enabled: true
+  imageType: COS_CONTAINERD
+  kubeletConfig:
+    insecureKubeletReadonlyPortEnabled: false
+    maxParallelImagePulls: 2
+  labels:
+    dedicated: user-workload
+    gke-no-default-nvidia-gpu-device-plugin: 'true'
+    nodeGroup: customer-gpu
+  machineType: a4-highgpu-8g
+  metadata:
+    disable-legacy-endpoints: 'true'
+  oauthScopes:
+  - https://www.googleapis.com/auth/cloud-platform
+  - https://www.googleapis.com/auth/dataaccessauditlogging
+  resourceLabels:
+    goog-gke-accelerator-type: nvidia-b200
+    goog-gke-node-pool-provisioning-model: on-demand
+  serviceAccount: default
+  shieldedInstanceConfig:
+    enableIntegrityMonitoring: true
+    enableSecureBoot: true
+  tags:
+  - customer-gpu
+  - customer-node
+  taints:
+  - effect: NO_EXECUTE
+    key: dedicated
+    value: user-workload
+  - effect: NO_SCHEDULE
+    key: nvidia.com/gpu
+    value: present
+  windowsNodeConfig: {}
+  workloadMetadataConfig:
+    mode: GKE_METADATA
+etag: 5481e4a0-0b42-4781-a7b9-94884b32529a
+initialNodeCount: 1
+instanceGroupUrls:
+- https://www.googleapis.com/compute/v1/projects/nv-dgxck8s-20250306/zones/europe-west4-b/instanceGroupManagers/gke-validation-19118545691-gpu-pool-0137f1a7-grp
+locations:
+- europe-west4-b
+management:
+  autoRepair: true
+  autoUpgrade: true
+maxPodsConstraint:
+  maxPodsPerNode: '110'
+name: gpu-pool
+networkConfig:
+  networkTierConfig:
+    networkTier: NETWORK_TIER_DEFAULT
+  podIpv4CidrBlock: 10.84.0.0/14
+  podRange: gke-validation-19118545691-pods-4986c464
+  subnetwork: projects/nv-dgxck8s-20250306/regions/europe-west4/subnetworks/default
+placementPolicy:
+  type: COMPACT
+podIpv4CidrSize: 24
+selfLink: https://container.googleapis.com/v1/projects/nv-dgxck8s-20250306/locations/europe-west4/clusters/validation-19118545691/nodePools/gpu-pool
+status: ERROR
+statusMessage: "Not all instances running in IGM after 15.86277883s. Expected 1, running\
+  \ 0, transitioning 1. Current errors: [CONDITION_NOT_MET]: Instance 'gke-validation-19118545691-gpu-pool-0137f1a7-77t8'\
+  \ creation failed: Operation denied by org policy: [customConstraints/custom.RestrictA4]\
+  \ : Prevent A4 Launches."
+upgradeSettings:
+  maxSurge: 1
+  strategy: SURGE
+version: 1.33.5-gke.1162000

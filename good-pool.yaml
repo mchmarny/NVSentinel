@@ -1,0 +1,98 @@
+autoscaling: {}
+config:
+  accelerators:
+  - acceleratorCount: '8'
+    acceleratorType: nvidia-h100-mega-80gb
+    gpuDriverInstallationConfig:
+      gpuDriverVersion: INSTALLATION_DISABLED
+  bootDisk:
+    diskType: pd-ssd
+    sizeGb: '200'
+  diskSizeGb: 200
+  diskType: pd-ssd
+  effectiveCgroupMode: EFFECTIVE_CGROUP_MODE_V2
+  ephemeralStorageLocalSsdConfig:
+    localSsdCount: 16
+  gvnic:
+    enabled: true
+  imageType: COS_CONTAINERD
+  kubeletConfig:
+    insecureKubeletReadonlyPortEnabled: false
+    maxParallelImagePulls: 3
+  labels:
+    dedicated: user-workload
+    gke-no-default-nvidia-gpu-device-plugin: 'true'
+    nodeGroup: customer-gpu
+  loggingConfig: {}
+  machineType: a3-megagpu-8g
+  metadata:
+    disable-legacy-endpoints: 'true'
+  oauthScopes:
+  - https://www.googleapis.com/auth/userinfo.email
+  - https://www.googleapis.com/auth/cloud-platform
+  reservationAffinity:
+    consumeReservationType: SPECIFIC_RESERVATION
+    key: compute.googleapis.com/reservation-name
+    values:
+    - projects/nv-dgxcloudprodgsc-20240206/reservations/gsc-a3-megagpu-8g-shared-res-2
+  resourceLabels:
+    env: non-prod
+    goog-gke-accelerator-type: nvidia-h100-mega-80gb
+    goog-gke-node-pool-provisioning-model: reservation
+  serviceAccount: attnnt01-gke-node@nv-dgxck8s-20250306.iam.gserviceaccount.com
+  shieldedInstanceConfig:
+    enableIntegrityMonitoring: true
+    enableSecureBoot: true
+  tags:
+  - customer-gpu
+  - customer-node
+  taints:
+  - effect: NO_EXECUTE
+    key: dedicated
+    value: user-workload
+  windowsNodeConfig: {}
+  workloadMetadataConfig:
+    mode: GKE_METADATA
+etag: 7d832456-f323-4eea-bc2e-608956f4214e
+initialNodeCount: 3
+instanceGroupUrls:
+- https://www.googleapis.com/compute/v1/projects/nv-dgxck8s-20250306/zones/europe-west4-b/instanceGroupManagers/gke-attnnt01-dgxc-k8-customer-gpu-a3--b2413826-grp
+locations:
+- europe-west4-b
+management:
+  autoRepair: true
+  autoUpgrade: true
+maxPodsConstraint:
+  maxPodsPerNode: '110'
+name: customer-gpu-a3-mega
+networkConfig:
+  additionalNodeNetworkConfigs:
+  - network: attnnt01-gpu-nic0
+    subnetwork: attnnt01-gpu-nic0
+  - network: attnnt01-gpu-nic1
+    subnetwork: attnnt01-gpu-nic1
+  - network: attnnt01-gpu-nic2
+    subnetwork: attnnt01-gpu-nic2
+  - network: attnnt01-gpu-nic3
+    subnetwork: attnnt01-gpu-nic3
+  - network: attnnt01-gpu-nic4
+    subnetwork: attnnt01-gpu-nic4
+  - network: attnnt01-gpu-nic5
+    subnetwork: attnnt01-gpu-nic5
+  - network: attnnt01-gpu-nic6
+    subnetwork: attnnt01-gpu-nic6
+  - network: attnnt01-gpu-nic7
+    subnetwork: attnnt01-gpu-nic7
+  enablePrivateNodes: true
+  networkTierConfig:
+    networkTier: NETWORK_TIER_DEFAULT
+  podIpv4CidrBlock: 192.168.128.0/17
+  podRange: pods-customer
+  subnetwork: projects/nv-dgxck8s-20250306/regions/europe-west4/subnetworks/attnnt01-default
+podIpv4CidrSize: 24
+selfLink: https://container.googleapis.com/v1/projects/nv-dgxck8s-20250306/locations/europe-west4/clusters/attnnt01-dgxc-k8s-gcp-ams-dev0/nodePools/customer-gpu-a3-mega
+status: RUNNING
+upgradeSettings:
+  maxUnavailable: 2
+  strategy: SURGE
+version: 1.33.5-gke.1080000

@@ -41,6 +41,7 @@ jobs:
       CAPACITY_RESERVATION: "projects/nv-dgxcloudprodgsc-20240206/reservations/gsc-a3-megagpu-8g-shared-res-2"
       REGION: "europe-west4"
       GPU_NODE_ZONE: "europe-west4-b"
+      GPU_NODE_TYPE: "a3-megagpu-8g"
 
     steps:
       # Checkout
@@ -71,6 +72,7 @@ jobs:
           CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
           REGION: ${{ env.REGION }}
           GPU_NODE_ZONE: ${{ env.GPU_NODE_ZONE }}
+          GPU_NODE_TYPE: ${{ env.GPU_NODE_TYPE }}
         run: |
           tests/uat/gcp/cluster-up.sh
           tests/uat/gcp/cluster-pool.sh
