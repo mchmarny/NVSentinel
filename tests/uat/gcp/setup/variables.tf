@@ -3,19 +3,7 @@
 variable "project_id" {
   description = "GCP Project ID"
   type        = string
-  default     = "proj-dgxc-nvsentinel"
-}
-
-variable "registry_location" {
-  description = "Location of the Artifact Registry"
-  type        = string
-  default     = "us"
-}
-
-variable "registry_name" {
-  description = "Name (ID) of the Artifact Registry"
-  type        = string
-  default     = "nvsentinel"
+  default     = "nv-dgxck8s-20250306"
 }
 
 variable "git_repo" {
