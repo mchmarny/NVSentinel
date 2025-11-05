@@ -35,9 +35,10 @@ jobs:
       TARGET_REG: us-docker.pkg.dev
       TARGET_REPO: nvsentinel
       CRANE_VERSION: "0.20.6"
-      IDENTITY_PROVIDER: "projects/868575635057/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
-      SERVICE_ACCOUNT: "github-actions-user@proj-dgxc-nvsentinel.iam.gserviceaccount.com"
-      PROJECT_ID: "proj-dgxc-nvsentinel"
+      IDENTITY_PROVIDER: "projects/1015254933832/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
+      SERVICE_ACCOUNT: "github-actions-user@nv-dgxck8s-20250306.iam.gserviceaccount.com"
+      PROJECT_ID: "nv-dgxck8s-20250306"
+
     steps:
       # Checkout
       - name: Checkout
