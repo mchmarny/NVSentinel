@@ -72,6 +72,8 @@ jobs:
       # Test
       - name: Install NVS
         shell: bash
+        env: 
+          CSP: "gcp"
         run: tests/uat/install-apps.sh
 
       - name: Run UAT Tests
