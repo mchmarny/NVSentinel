@@ -39,6 +39,8 @@ jobs:
       SERVICE_ACCOUNT: "github-actions-user@nv-dgxck8s-20250306.iam.gserviceaccount.com"
       PROJECT_ID: "nv-dgxck8s-20250306"
       CAPACITY_RESERVATION: "projects/nv-dgxcloudprodgsc-20240206/reservations/gsc-a3-megagpu-8g-shared-res-2"
+      REGION: "europe-west4"
+      GPU_NODE_ZONE: "europe-west4-b"
 
     steps:
       # Checkout
@@ -67,6 +69,8 @@ jobs:
           TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
           GPU_NODE_CAPACITY_RESERVATION: "${{ env.CAPACITY_RESERVATION }}"
           CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
+          REGION: ${{ env.REGION }}
+          GPU_NODE_ZONE: ${{ env.GPU_NODE_ZONE }}
         run: tests/uat/gcp/cluster-up.sh
 
       # Test

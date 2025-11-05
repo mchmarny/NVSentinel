@@ -34,17 +34,11 @@ if [[ -z "${PROJECT_ID}" ]]; then
   exit 1
 fi;
 
-# Check region is set
-export REGION=$(gcloud config list --format 'value(compute.region)')
-if [[ -z "${REGION}" ]]; then
-  echo "Warning: \`gcloud config set compute/region YOUR_REGION\` not set, using default."
-  export REGION="us-central1"
-fi
-
 # If variable CLUSTER_SUFFIX is not set, default to timestamp
 export CLUSTER_NAME_SUFFIX="${CLUSTER_NAME_SUFFIX:-$(date +%s)}"
 
 # Config
+export REGION="${REGION:-europe-west4}"
 export CLUSTER_VERSION="${CLUSTER_VERSION:-1.33.5-gke.1162000}"
 export CLUSTER_NAME="${CLUSTER_NAME:-validation-${CLUSTER_NAME_SUFFIX}}"
 export CLUSTER_CHANNEL="${CLUSTER_CHANNEL:-regular}"
@@ -52,7 +46,7 @@ export SYSTEM_NODE_TYPE="${SYSTEM_NODE_TYPE:-e2-standard-4}"
 export SYSTEM_NODE_COUNT="${SYSTEM_NODE_COUNT:-1}"
 export GPU_NODE_TYPE="${GPU_NODE_TYPE:-a3-megagpu-8g}"
 export GPU_NODE_COUNT="${GPU_NODE_COUNT:-1}"
-export GPU_NODE_ACCELERATOR="${GPU_NODE_ACCELERATOR:-type=nvidia-h100-mega-80gb,count=8}"
+export GPU_NODE_ZONE="${GPU_NODE_ZONE:-${REGION}-b}"
 export GPU_NODE_CAPACITY_RESERVATION="${GPU_NODE_CAPACITY_RESERVATION:-}"
 
 # SERVICE_ACCOUNT is optional - set by workflow or provide manually

@@ -63,45 +63,6 @@ gcloud container clusters describe "$CLUSTER_NAME" \
     --region="$REGION" \
     --format="value(currentMasterVersion)"
 
-# Add GPU node pool if specified
-if [[ "$GPU_NODE_COUNT" -gt 0 ]]; then
-    echo "Adding GPU node pool..."
-    
-    # Base command for GPU instances
-    # Note: A4 instances (a4-highgpu-8g) have 8x H100-80GB GPUs pre-attached
-    # DO NOT use --accelerator flag for A4 instances - it will cause an error
-    # GKE automatically installs and manages GPU drivers for A4 instances
-    CMD=(
-        gcloud container node-pools create gpu-pool
-            --cluster="$CLUSTER_NAME"
-            --region="$REGION"
-            --disk-type="pd-ssd"
-            --disk-size=200
-            --machine-type="$GPU_NODE_TYPE"
-            --image-type="COS_CONTAINERD"
-            --num-nodes="$GPU_NODE_COUNT"
-            --scopes="https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/dataaccessauditlogging"
-            --workload-metadata=GKE_METADATA
-            --enable-gvnic
-            --node-taints="dedicated=user-workload:NoExecute"
-            --node-labels="nodeGroup=customer-gpu,dedicated=user-workload,gke-no-default-nvidia-gpu-device-plugin=true"
-            --tags="customer-gpu,customer-node"
-            --shielded-secure-boot
-            --local-nvme-ssd-block="count=16"
-    )
-    
-    # Add capacity reservation only if specified
-    if [[ -n "$GPU_NODE_CAPACITY_RESERVATION" ]]; then
-        CMD+=(
-            --reservation-affinity=specific
-            --reservation="$GPU_NODE_CAPACITY_RESERVATION"
-        )
-    fi
-    
-    # Execute the command
-    "${CMD[@]}"
-fi
-
 # Install Auth Plugin
 gcloud components install kubectl --quiet
 gcloud components install gke-gcloud-auth-plugin --quiet
