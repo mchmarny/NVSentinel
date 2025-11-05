@@ -303,6 +303,8 @@ main() {
         create_fake_gpu_nodes
         install_fake_gpu_stack
         wait_for_fake_gpu_stack
+    elif [[ "$CSP" == "gcp" ]]; then
+        log "Skipping GPU Operator installation - GKE drivers are pre-installed for A4* instances"
     else
         install_gpu_operator
         wait_for_gpu_operator

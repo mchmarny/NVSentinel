@@ -64,22 +64,34 @@ gcloud container clusters describe "$CLUSTER_NAME" \
     --format="value(currentMasterVersion)"
 
 # Add GPU node pool if specified
-# TODO: Add capacity reservation for GPUs
 if [[ "$GPU_NODE_COUNT" -gt 0 ]]; then
     echo "Adding GPU node pool..."
-    gcloud container node-pools create gpu-pool \
-        --cluster="$CLUSTER_NAME" \
-        --region="$REGION" \
-        --disk-type "pd-balanced" \
-        --disk-size "100" \
-        --ephemeral-storage-local-ssd \
-        --machine-type="$GPU_NODE_TYPE" \
-        --num-nodes="$GPU_NODE_COUNT" \
-        --accelerator="type=nvidia-h100-mega-80gb,count=8" \
-        --reservation="$GPU_NODE_CAPACITY_RESERVATION" \
-        --scopes=cloud-platform \
-        --enable-autorepair \
-        --workload-metadata="GKE_METADATA"
+    
+    # Base command for instances
+    CMD=(
+        gcloud container node-pools create gpu-pool
+        --cluster="$CLUSTER_NAME"
+        --region="$REGION"
+        --disk-type=pd-balanced
+        --disk-size=100
+        --machine-type="$GPU_NODE_TYPE"
+        --num-nodes="$GPU_NODE_COUNT"
+        --scopes=cloud-platform
+        --enable-autorepair
+        --workload-metadata=GKE_METADATA
+        --enable-gvnic
+    )
+    
+    # Add capacity reservation only if specified
+    if [[ -n "$GPU_NODE_CAPACITY_RESERVATION" ]]; then
+        CMD+=(
+            --reservation-affinity=specific
+            --reservation="$GPU_NODE_CAPACITY_RESERVATION"
+        )
+    fi
+    
+    # Execute the command
+    "${CMD[@]}"
 fi
 
 # Install Auth Plugin

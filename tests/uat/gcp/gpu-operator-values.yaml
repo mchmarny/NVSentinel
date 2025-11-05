@@ -12,11 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Resolved values file for GCP deployment
-# This file is generated from gpu-operator-values.yaml template
-# with .This.spec.csp.provider = "gcp"
+# GPU Operator values for GCP/GKE
+# GKE automatically manages GPU drivers for A4, L4, H100, and other GPU instances.
+# 
+# This file is kept for reference but the install script now skips GPU Operator for CSP=gcp
+# See: https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers
+driver:
+  enabled: false  # GKE pre-installs drivers
 
-# GCP-specific configuration for GPU health monitor
+toolkit:
+  enabled: true   # Only install NVIDIA Container Toolkit if needed
+
+devicePlugin:
+  enabled: false  # GKE pre-installs device plugin
+
+dcgmExporter:
+  enabled: true   # Enable DCGM metrics exporter
+
+gfd:
+  enabled: false  # GKE sets GPU labels automatically
+
+operator:
+  defaultRuntime: containerd
+
+# NVSentinel-specific configuration for GPU health monitor
+# (This is for NVSentinel chart, not GPU Operator)
 gpu-health-monitor:
   additionalVolumeMounts:
     - mountPath: /usr/local/nvidia

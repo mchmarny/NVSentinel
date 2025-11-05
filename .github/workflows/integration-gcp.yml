@@ -81,9 +81,10 @@ jobs:
         run: tests/uat/tests.sh
 
       # Teardown
-      - name: Destroy Cluster
-        if: always() && steps.create-cluster.outcome != 'skipped'
-        shell: bash
-        env:
-          CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
-        run: tests/uat/gcp/cluster-down.sh
+      # TODO: re-enable once app install is stable
+      # - name: Destroy Cluster
+      #   if: always() && steps.create-cluster.outcome != 'skipped'
+      #   shell: bash
+      #   env:
+      #     CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
+      #   run: tests/uat/gcp/cluster-down.sh
