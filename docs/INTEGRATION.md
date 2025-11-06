@@ -24,7 +24,7 @@ Think of NVSentinel integration in four layers:
 4. **How do I customize drain behavior?** → Configure **[per-namespace eviction modes](#4-how-do-i-customize-drain-behavior-configure-eviction-modes)**
    - Control how workloads are evicted from failing nodes
    - Define different policies for stateless vs stateful workloads
-   - Set timeouts and grace periods per each namespace
+   - Set timeouts and grace periods per namespace
 
 ### Quick Start
 
