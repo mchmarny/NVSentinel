@@ -4,6 +4,7 @@ locals {
     "roles/compute.networkAdmin",
     "roles/container.admin",              # Full Kubernetes Engine Admin (includes RBAC permissions)
     "roles/container.clusterAdmin",       # Cluster management permissions
+    "roles/container.defaultNodeServiceAccount", # Full access to the default GKE node service account
     "roles/iam.serviceAccountAdmin",
     "roles/storage.objectAdmin",
   ])
