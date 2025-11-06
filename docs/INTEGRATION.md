@@ -1,112 +1,277 @@
-# NVSentinel Integration
+# NVSentinel Integration Guide
 
-> Note: code implementation links are for document review purposes only, will be removed before publishing
+NVSentinel detects GPU and hardware failures and exposes them using standard Kubernetes primitives. This document provides high level overview of how to integrate with NVSentinel for scheduling, monitoring, and remediation purposes. 
 
-## Overview
+### Integration Model
 
-NVSentinel exposes GPU and hardware health status through native Kubernetes primitives: **Node Conditions**, **Taints**, and **Labels**. This document defines the standardized conventions that external systems can rely on for integration, monitoring, and scheduling decisions.
+Think of NVSentinel integration in four layers:
 
-- Platform teams can monitor node health using standard Kubernetes tools
-- Schedulers can make informed placement decisions based on hardware state
-- Monitoring systems can alert on specific hardware failures
-- External automation can respond to health events without NVSentinel-specific knowledge
+1. **Is a node bad?** → Check **[Taints](#1-is-a-node-bad-check-taints)**
+   - Taints mark nodes with hardware issues
+   - Use taints for scheduling decisions and filtering
+   - React to taint presence/absence in automation
+
+2. **Why is a node bad?** → Check **[Node Conditions](#2-why-is-a-node-bad-check-node-conditions)**
+   - Conditions provide detailed diagnostic information
+   - Use conditions for monitoring, alerting, and dashboards
+   - Each condition explains what hardware component failed
+
+3. **Can I use my own remediation?** → Provide a **[Custom Resource](#3-can-i-use-my-own-remediation-provide-a-custom-resource)**
+   - NVSentinel triggers external systems via CRs
+   - Integrate with cloud APIs, DCIM, or custom controllers
+   - You retain full control over how nodes are repaired
+
+4. **How do I customize drain behavior?** → Configure **[per-namespace eviction modes](#4-how-do-i-customize-drain-behavior-configure-eviction-modes)**
+   - Control how workloads are evicted from failing nodes
+   - Define different policies for stateless vs stateful workloads
+   - Set timeouts and grace periods per each namespace
+
+### Quick Start
+
+**For Scheduling Decisions:**
+
+Find nodes with NVSentinel taints (if configured):
+
+```shell
+kubectl get nodes -o json | jq '.items[] 
+  | select(.spec.taints[]? 
+  | select(.key | startswith("nvidia.com/"))) 
+  | .metadata.name'
+```
+
+**For Monitoring:**
+
+Get detailed failure information:
+
+```shell
+kubectl get nodes -o json | jq '.items[].status.conditions[] 
+  | select(.type | startswith("Gpu"))'
+```
+
+**For Pod Tolerations:**
+
+```yaml
+# Match the taint configured in your fault-quarantine rulesets
+tolerations:
+  - key: "nvidia.com/gpu-xid-error"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+```
 
 ## Architecture
 
-NVSentinel uses a three-layer approach to signal node health:
+The [DATA_FLOW.md](docs/DATA_FLOW.md) provides more context on this, at the higher level though, NVSentinel detects hardware failures and applies graduated responses via:
 
-1. **Node Conditions** (Layer 1) - Set by Platform Connectors based on health events
-   - **Function:** `updateNodeConditions()` in `platform-connectors/pkg/connectors/kubernetes/process_node_events.go:44`
-   - **Updates:** `node.Status.Conditions` via `clientset.CoreV1().Nodes().UpdateStatus()`
-   
-2. **Taints** (Layer 2) - Applied by Fault Quarantine based on CEL rules
-   - **Function:** `QuarantineNodeAndSetAnnotations()` → `applyTaints()` in `fault-quarantine/pkg/informer/k8s_client.go:197-233`
-   - **Updates:** `node.Spec.Taints` via `clientset.CoreV1().Nodes().Update()`
-   
-3. **Labels** (Layer 3) - Maintained by Labeler and Platform Connectors for metadata
-   - **Functions:** 
-     - `updateNodeLabelsForPod()` in `labeler/pkg/labeler/labeler.go:394` (DCGM/driver labels)
-     - `updateKataLabel()` in `labeler/pkg/labeler/labeler.go:468` (Kata labels)
-   - **Updates:** `node.Labels` via `clientset.CoreV1().Nodes().Update()`
+1. **Detection**: Health monitors check GPU, system logs, and cloud maintenance events
+2. **Classification**: Platform connectors validate and set node conditions
+3. **Quarantine**: Fault quarantine evaluates rules and applies taints/cordons
+4. **Evacuation**: Node drainer evicts workloads per configured policies
+5. **Remediation**: Fault remediation triggers external systems via CRs
 
 ```
 ┌─────────────────────┐
 │  Health Monitors    │ GPU, Syslog, CSP health detection
 └──────────┬──────────┘
-           │ gRPC HealthEvent
+           │ Detect failures
            ▼
 ┌─────────────────────┐
-│ Platform Connectors │ Validates and persists events
+│ Platform Connectors │ Set NodeConditions (why is it bad?)
 └──────────┬──────────┘
-           │
-           ├─────────────► MongoDB (event store)
-           │
-           └─────────────► Kubernetes API: Set NodeCondition
-                                            (checkName → ConditionType)
-
-MongoDB Change Stream
            │
            ▼
 ┌─────────────────────┐
-│ Fault Quarantine    │ Evaluates CEL rules
+│ Fault Quarantine    │ Apply Taints (node is bad)
 └──────────┬──────────┘
            │
-           └─────────────► Kubernetes API: Apply Taint + Cordon
-                                            (based on ruleset config)
-
+           ▼
 ┌─────────────────────┐
-│ Labeler             │ Watches pods and nodes
+│ Node Drainer        │ Evict workloads per policy
 └──────────┬──────────┘
            │
-           └─────────────► Kubernetes API: Set Labels
-                                            (DCGM version, driver status, kata)
+           ▼
+┌─────────────────────┐
+│ Fault Remediation   │ Trigger external systems (your CR)
+└─────────────────────┘
 ```
 
-## Node Conditions
+---
 
-### Overview
+## 1. Is a Node Bad? Check Taints
 
-Platform Connectors set NodeConditions directly based on the `checkName` field from HealthEvents. The condition type is the check name itself, creating a 1:1 mapping.
+**Use taints for all scheduling and automation decisions.**
 
-**Code Reference:** `platform-connectors/pkg/connectors/kubernetes/process_node_events.go:83,328`
+Taints are the primary signal that a node has hardware issues. External systems should watch for taint presence/absence to make scheduling decisions, trigger alerts, or initiate remediation workflows.
+
+> **Note**: Taints are **optional and disabled by default**. You must configure them in fault-quarantine rulesets by uncommenting the `taint` section. NVSentinel only cordons nodes by default.
+
+### Taint Structure
+
+**Format:** User-configurable via rulesets. Common patterns:
+
+**Option 1: Component-specific (recommended)**
+```
+nvidia.com/gpu-xid-error
+nvidia.com/gpu-nvlink-error
+nvidia.com/syslog-xid-error
+```
+
+**Option 2: Hierarchical (proposed pattern)**
+```
+gpu.health/memory-error
+nvlink.health/link-down
+nvswitch.health/fatal-error
+```
+
+### Default Taint Examples (From Test Suite)
+
+NVSentinel's test suite demonstrates these taint configurations:
+
+| Taint Key                       | Value  | Effect       | Use Case                    |
+|---------------------------------|--------|--------------|
+|-----------------------------|
+| `nvidia.com/gpu-xid-error`      | `true` | `NoSchedule` | GPU XID critical errors     |
+| `nvidia.com/gpu-nvlink-error`   | `true` | `NoSchedule` | NVLink connection failures  |
+| `nvidia.com/syslog-xid-error`   | `true` | `NoSchedule` | Syslog-detected XID errors  |
+| `nvidia.com/gpu-error`          | `true` | `NoSchedule` | Generic GPU hardware errors |
+
+You can configure any taint keys/values in your rulesets based on your needs.
+
+### Taint Effect Guidelines
+
+| Effect              | Use Case                         | Impact                                          |
+|---------------------|----------------------------------|-------------------------------------------------|
+| `NoSchedule`        | Fatal errors requiring remediation | New pods without toleration won't be scheduled |
+| `PreferNoSchedule`  | Degraded state or warnings       | Scheduler tries to avoid but will schedule if necessary |
+| `NoExecute`         | Immediate evacuation needed      | Existing pods without toleration are evicted (rarely used) |
+
+### Configuring Taints
+
+Taints are defined in Fault Quarantine rulesets. Here's an example showing how to enable taints:
+
+```yaml
+# distros/kubernetes/nvsentinel/charts/fault-quarantine/values.yaml
+rulesets:
+  - version: "1"
+    name: "GPU XID Critical Errors"
+    priority: 100
+    match:
+      any:
+        - kind: "HealthEvent"
+          expression: 'event.checkName == "GpuXidError" && event.isFatal == true'
+    # Uncomment to enable tainting:
+    taint:
+      key: "nvidia.com/gpu-xid-error"  # Choose your own key format
+      value: "true"                    # Or use "fatal", "degraded", etc.
+      effect: "NoSchedule"
+    cordon:
+      shouldCordon: true  # Enabled by default
+```
+
+**Key Points:**
+- Taints are **commented out by default** - you must enable them
+- You control the taint key format (`nvidia.com/*` or `gpu.health/*` or any custom format)
+- You control the taint values (`true`, `fatal`, `degraded`, etc.)
+- Cordoning is enabled by default; tainting is opt-in
+
+### Integration Patterns
+
+**Check if node has any NVIDIA-related taints:**
+```shell
+kubectl get nodes -o json | jq '.items[] 
+  | select(.spec.taints[]? 
+  | select(.key | startswith("nvidia.com/"))) 
+  | .metadata.name'
+```
+
+**Check for specific error type:**
+```shell
+kubectl get nodes -o json | jq '.items[] 
+  | select(.spec.taints[]? 
+  | select(.key == "nvidia.com/gpu-xid-error")) 
+  | .metadata.name'
+```
+
+**Tolerate specific taints in pod specs:**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-workload
+spec:
+  tolerations:
+    # Match the exact taint configured in your rulesets
+    - key: "nvidia.com/gpu-xid-error"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+```
+
+**Watch for taint changes (automation):**
+
 ```go
-conditionType := corev1.NodeConditionType(string(event.CheckName))
+informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+    UpdateFunc: func(oldObj, newObj interface{}) {
+        newNode := newObj.(*corev1.Node)
+        
+        // Check for NVIDIA-related taints
+        for _, taint := range newNode.Spec.Taints {
+            if strings.HasPrefix(taint.Key, "nvidia.com/") {
+                // Trigger alert, update scheduler, etc.
+                log.Printf("Node %s has taint %s=%s", 
+                    newNode.Name, taint.Key, taint.Value)
+            }
+        }
+    },
+})
 ```
 
-### Naming Convention
+---
 
-- **Format:** PascalCase, descriptive names from health monitor check names
-- **Examples:** `GpuMemoryError`, `NVLinkDown`, `ThermalThrottle`, `CSPMaintenance`
+## 2. Why is a Node Bad? Check Node Conditions
 
-### Condition Status Semantics
+**Use node conditions for monitoring, alerting, and detailed diagnostics.**
 
-| Status | Meaning | When Set |
-|--------|---------|----------|
-| `True` | Error/fault detected | HealthEvent with `isFatal=true` or `isHealthy=false` |
-| `False` | Component healthy | HealthEvent with `isHealthy=true` |
-| `Unknown` | Health state cannot be determined | Initial state or monitoring failure |
+While taints tell you "this node is bad", conditions tell you *why* it's bad. Use conditions for dashboards, alerts, and troubleshooting.
+
+### Condition Structure
+
+Platform Connectors set NodeConditions based on health monitor checks. Each condition explains what hardware component failed.
+
+**Naming:** PascalCase, directly from health monitor check names  
+**Examples:** `GpuMemoryError`, `NVLinkDown`, `GpuThermalWatch`, `CSPMaintenance`
+
+### Condition Status
+
+| Status    | Meaning                           |
+|-----------|-----------------------------------|
+| `True`    | Error/fault detected              |
+| `False`   | Component healthy                 |
+| `Unknown` | Health state cannot be determined |
 
 ### Condition Message Format
 
-Condition messages follow this pattern:
+Messages include error codes and recommended actions:
+
 ```
 [ErrorCode1, ErrorCode2] Human-readable description - RecommendedAction: ACTION_NAME
 ```
 
 **Example:**
+
 ```yaml
 conditions:
   - type: GpuMemoryError
     status: "True"
     reason: HardwareFailure
-    message: "[DCGM_FR_FAULTY_MEMORY] GPU memory failure detected - RecommendedAction: RESTART_VM"
+    message: "[DCGM_FR_FAULTY_MEMORY] GPU memory failure detected on GPU 0 - RecommendedAction: RESTART_VM"
     lastTransitionTime: "2025-11-06T10:00:00Z"
 ```
 
-### Standard Condition Types by Component
+### Standard Condition Types
 
 #### GPU Conditions
-These conditions are set by `gpu-health-monitor` based on DCGM diagnostics:
 
 - `GpuMemoryError` - GPU memory failures (ECC errors, faulty memory)
 - `GpuThermalWatch` - Thermal throttling or temperature violations
@@ -116,177 +281,345 @@ These conditions are set by `gpu-health-monitor` based on DCGM diagnostics:
 - `GpuInforomCorrupt` - Inforom corruption detected
 
 #### NVLink Conditions
+
 - `NVLinkDown` - NVLink connection down
 - `NVLinkCrcError` - NVLink CRC error threshold exceeded
 - `NVLinkErrorCritical` - Critical NVLink errors
 
 #### NVSwitch Conditions
+
 - `NVSwitchFatalError` - Fatal NVSwitch hardware error
 - `NVSwitchDown` - NVSwitch unavailable
 - `NVSwitchNonFatalError` - Non-fatal NVSwitch errors (warnings)
 
 #### System Conditions
+
 - `DCGMError` - DCGM daemon or API failures
-- `DriverError` - NVIDIA driver issues
-- `CSPMaintenance` - Cloud provider scheduled maintenance (set by `csp-health-monitor`)
-- `SyslogError` - System log analysis detected issues (set by `syslog-health-monitor`)
+- `CSPMaintenance` - Cloud provider scheduled maintenance
+- `SyslogError` - System log analysis detected issues
 
-### Implementation Details
+### Integration Patterns
 
-**Platform Connectors Module** sets conditions as follows:
+**Monitor specific condition types:**
 
-1. Receives HealthEvent via gRPC
-2. Extracts `checkName` field as the condition type
-3. Determines status based on `isFatal` and `isHealthy` flags
-4. Constructs message from `errorCode`, `message`, and `recommendedAction`
-5. Updates node via Kubernetes API with retry logic
+```shell
+kubectl get nodes -o json | jq '.items[] 
+  | select(.status.conditions[] | select(.type=="GpuMemoryError" and .status=="True")) 
+  | .metadata.name'
+```
 
-**Code Location:** `platform-connectors/pkg/connectors/kubernetes/process_node_events.go`
+**Watch for condition changes:**
 
-## Taints
+```shell
+kubectl get nodes -w -o json | jq -c 'select(.status.conditions[] | select(.type | startswith("Gpu")))'
+```
 
-### Overview
+**Prometheus alert example:**
 
-Taints are applied by the Fault Quarantine module based on configurable CEL rules. Unlike conditions (which are always set), taints are optional and configured per deployment based on operational policies.
+```yaml
+groups:
+  - name: nvsentinel
+    rules:
+      - alert: GpuMemoryError
+        expr: kube_node_status_condition{condition="GpuMemoryError",status="true"} == 1
+        annotations:
+          summary: "GPU memory error on {{ $labels.node }}"
+```
 
-### Naming Convention
+**client-go example:**
 
-**Format:** `component.health/error-type`
+```go
+informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+    UpdateFunc: func(oldObj, newObj interface{}) {
+        newNode := newObj.(*corev1.Node)
+        for _, condition := range newNode.Status.Conditions {
+            if strings.HasPrefix(string(condition.Type), "Gpu") && condition.Status == corev1.ConditionTrue {
+                // Send alert with condition.Message
+                log.Printf("GPU issue on %s: %s", newNode.Name, condition.Message)
+            }
+        }
+    },
+})
+```
 
-| Prefix | Component | Example Keys |
-|--------|-----------|--------------|
-| `gpu.health/` | GPU-specific errors | `gpu.health/memory-error`, `gpu.health/thermal-warning` |
-| `nvlink.health/` | NVLink errors | `nvlink.health/link-down`, `nvlink.health/crc-error` |
-| `nvswitch.health/` | NVSwitch errors | `nvswitch.health/fatal-error` |
-| `system.health/` | Driver, DCGM, CSP | `system.health/driver-error`, `system.health/dcgm-failure` |
+---
 
-### Taint Values
+## 3. Can I Use My Own Remediation? Provide a Custom Resource
 
-Taint values indicate severity:
+**NVSentinel triggers external systems by creating Kubernetes Custom Resources.**
 
-- **`fatal`** - Requires immediate remediation, node is unsafe for workloads
-- **`degraded`** - Performance impact, workloads may run with reduced capability
-- **`warning`** - Monitor only, workloads can continue normally
+After detecting and draining a failing node, NVSentinel creates a CR that your controller watches. This gives you full control over remediation - integrate with cloud APIs, DCIM systems, or custom workflows.
 
-### Taint Effect Guidelines
+### Integration Architecture
 
-| Effect | Use Case | Impact |
-|--------|----------|--------|
-| `NoSchedule` | Fatal errors requiring remediation | New pods without toleration won't be scheduled |
-| `PreferNoSchedule` | Degraded state or warnings | Scheduler tries to avoid but will schedule if necessary |
-| `NoExecute` | Immediate evacuation needed | Existing pods without toleration are evicted (rarely used) |
+```
+┌────────────────────┐
+│ Fault Remediation  │ Watches drained nodes
+│     Module         │
+└─────────┬──────────┘
+          │ Creates CR based on RecommendedAction
+          ▼
+┌────────────────────┐
+│ Kubernetes API     │ Custom Resource created
+│  (RebootNode,      │
+│   TerminateNode)   │
+└─────────┬──────────┘
+          │ Watched by external controller
+          ▼
+┌────────────────────┐
+│ External System    │ Janitor, cloud APIs, DCIM
+│  (Your Controller) │
+└────────────────────┘
+```
 
 ### Configuration
 
-Taints are defined in Fault Quarantine rulesets using CEL expressions:
+Configure the maintenance CR template and behavior:
 
-```toml
-[[rule-sets]]
-  name = "Fatal GPU Memory Error"
-  priority = 100
-  
-  [[rule-sets.match.any]]
-    kind = "HealthEvent"
-    expression = 'componentClass == "GPU" AND errorCode == "DCGM_FR_FAULTY_MEMORY" AND isFatal == true'
-  
-  [rule-sets.taint]
-    key = "gpu.health/memory-error"
-    value = "fatal"
-    effect = "NoSchedule"
-  
-  [rule-sets.cordon]
-    shouldCordon = true
-```
-
-### Standard Taint Examples
-
-**Fatal GPU Error:**
 ```yaml
-taints:
-  - key: "gpu.health/memory-error"
-    value: "fatal"
-    effect: "NoSchedule"
+# distros/kubernetes/nvsentinel/charts/fault-remediation/values.yaml
+maintenance:
+  # API group of your maintenance CRD
+  apiGroup: "janitor.dgxc.nvidia.com"
+  version: "v1alpha1"
+  kind: "RebootNode"
+  
+  # Completion condition to check before creating new CRs
+  # Prevents duplicate remediation requests for the same node
+  completeConditionType: "NodeReady"
+  
+  # Namespace where maintenance CRs will be created
+  namespace: "nvsentinel"
+  
+  # Resource names for RBAC permissions
+  resourceNames:
+    - "rebootnodes"
+    - "terminatenodes"
+  
+  # Go template for generating maintenance CRs
+  # Available variables: .ApiGroup, .Version, .RecommendedAction, .NodeName, .HealthEventID
+  template: |
+    apiVersion: {{ .ApiGroup }}/{{ .Version }}
+    kind: {{ if eq .RecommendedAction 2 }}RebootNode{{ else }}TerminateNode{{ end }}
+    metadata:
+      name: maintenance-{{ .NodeName }}-{{ .HealthEventID }}
+      namespace: {{ .Namespace }}
+    spec:
+      nodeName: {{ .NodeName }}
+      reason: "Health event {{ .HealthEventID }}"
+      force: false
+
+# Retry configuration for CR creation
+updateRetry:
+  maxRetries: 5
+  retryDelaySeconds: 10
 ```
 
-**Thermal Warning:**
+### Custom Resource Template
+
+The template uses Go template syntax with these variables:
+
+| Variable             | Type    | Description                                  |
+|----------------------|---------|----------------------------------------------|
+| `.ApiGroup`          | string  | API group from `maintenance.apiGroup`        |
+| `.Version`           | string  | API version from `maintenance.version`       |
+| `.Kind`              | string  | Resource kind from `maintenance.kind`        |
+| `.RecommendedAction` | int     | Numeric action code (2=reboot, 15=terminate) |
+| `.NodeName`          | string  | Name of the node requiring remediation       |
+| `.HealthEventID`     | string  | Unique ID of the triggering health event     |
+| `.Namespace`         | string  | Namespace from `maintenance.namespace`       |
+
+### RecommendedAction Codes
+
+| Code | Action            | Typical Use Case              |
+|------|-------------------|-------------------------------|
+| `2`  | `COMPONENT_RESET` | GPU/driver reset, reboot node |
+| `5`  | `CONTACT_SUPPORT` | Manual intervention needed    |
+| `15` | `RESTART_VM`      | Reboot VM instance            |
+| `24` | `RESTART_BM`      | Reboot bare metal node        |
+| `25` | `REPLACE_VM`      | Terminate and replace VM      |
+
+### Integration Examples
+
+#### Example 1: Janitor Controller Integration
+
+Janitor controller watches for `RebootNode` and `TerminateNode` CRs:
+
 ```yaml
-taints:
-  - key: "gpu.health/thermal-warning"
-    value: "warning"
-    effect: "PreferNoSchedule"
+apiVersion: janitor.dgxc.nvidia.com/v1alpha1
+kind: RebootNode
+metadata:
+  name: maintenance-gpu-node-01-673bac8e9f1234567890abcd
+  namespace: nvsentinel
+spec:
+  nodeName: gpu-node-01
+  reason: "Health event 673bac8e9f1234567890abcd"
+  force: false
+status:
+  conditions:
+    - type: NodeReady
+      status: "False"
+      reason: "RebootInProgress"
 ```
 
-**NVLink Degraded:**
+#### Example 2: Cloud Provider Integration
+
+Custom template for cloud-specific maintenance:
+
 ```yaml
-taints:
-  - key: "nvlink.health/link-down"
-    value: "degraded"
-    effect: "NoSchedule"
+maintenance:
+  apiGroup: "cloud.example.com"
+  version: "v1"
+  kind: "NodeMaintenance"
+  template: |
+    apiVersion: {{ .ApiGroup }}/{{ .Version }}
+    kind: NodeMaintenance
+    metadata:
+      name: {{ .NodeName }}-{{ .HealthEventID }}
+    spec:
+      nodeName: {{ .NodeName }}
+      action: {{ if eq .RecommendedAction 2 }}"reboot"{{ else if eq .RecommendedAction 15 }}"restart"{{ else }}"replace"{{ end }}
+      provider:
+        region: "us-west-2"
+        instanceId: "{{ .NodeName }}"
 ```
 
-### Implementation Details
+#### Example 3: DCIM Integration
 
-**Fault Quarantine Module** applies taints as follows:
+Template for data center infrastructure management:
 
-1. Watches MongoDB Change Streams for new HealthEvents
-2. Evaluates CEL rules against event + node context
-3. If ruleset matches, applies configured taint via Kubernetes API
-4. Cordons node if `shouldCordon: true`
-5. Removes taints when healthy events arrive
+```yaml
+maintenance:
+  apiGroup: "dcim.example.com"
+  version: "v1alpha1"
+  kind: "ServerMaintenance"
+  template: |
+    apiVersion: {{ .ApiGroup }}/{{ .Version }}
+    kind: ServerMaintenance
+    metadata:
+      name: server-{{ .NodeName }}
+    spec:
+      serverName: {{ .NodeName }}
+      maintenanceType: {{ if eq .RecommendedAction 2 }}"reboot"{{ else }}"replace"{{ end }}
+      priority: "high"
+      ticketId: "HEALTH-{{ .HealthEventID }}"
+```
 
-**Configuration Location:** `distros/kubernetes/nvsentinel/charts/fault-quarantine/values.yaml`
+### Completion Detection
 
-## Labels
+Fault Remediation checks the `completeConditionType` status on existing CRs before creating new ones:
 
-### Overview
+- **Status: True** - Maintenance completed successfully, new CR can be created
+- **Status: False** - Maintenance failed, new CR can be created for retry
+- **Condition Missing** - Maintenance in progress, skip CR creation
 
-Labels provide metadata about node health state, DCGM/driver versions, and configuration. These are informational and don't affect scheduling directly (unlike taints).
+This prevents duplicate remediation requests for nodes with ongoing maintenance.
 
-### Namespace Convention
+### Testing Your Integration
 
-All NVSentinel labels use the prefix: `nvsentinel.dgxc.nvidia.com/`
+1. **Validate Template Syntax**:
+   
+   ```shell
+   # Dry-run mode to validate template without creating CRs
+   helm install nvsentinel --set global.dryRun=true ...
+   ```
 
-### Standard Labels
+2. **Monitor CR Creation**:
+   ```shell
+   # Watch for maintenance CRs
+   kubectl get rebootnodes -n nvsentinel -w
+   ```
 
-#### Health Metadata Labels
+3. **Check Fault Remediation Logs**:
+   ```shell
+   kubectl logs -n nvsentinel deployment/fault-remediation -f
+   ```
 
-| Label Key | Value Format | Purpose | Set By |
-|-----------|--------------|---------|--------|
-| `nvsentinel.dgxc.nvidia.com/error-code` | DCGM error code string | Primary error code from health event | Platform Connectors |
-| `nvsentinel.dgxc.nvidia.com/recommended-action` | RecommendedAction enum | Suggested remediation | Platform Connectors |
-| `nvsentinel.dgxc.nvidia.com/quarantine-status` | `cordoned`\|`drained`\|`remediation-triggered` | Current state in remediation workflow | Multiple modules |
-| `nvsentinel.dgxc.nvidia.com/last-health-check` | ISO8601 timestamp | Last health monitor check time | Platform Connectors |
-| `nvsentinel.dgxc.nvidia.com/health-event-id` | MongoDB ObjectID | Correlation ID to event in database | Platform Connectors |
+**Configuration Location:** `distros/kubernetes/nvsentinel/charts/fault-remediation/values.yaml`
 
-#### Configuration Labels
+---
 
-| Label Key | Value Format | Purpose | Set By |
-|-----------|--------------|---------|--------|
-| `nvsentinel.dgxc.nvidia.com/dcgm.version` | Semantic version (e.g., `3.3.5`) | DCGM version running on node | Labeler |
-| `nvsentinel.dgxc.nvidia.com/driver.installed` | `true`\|`false` | Whether NVIDIA driver is installed | Labeler |
-| `nvsentinel.dgxc.nvidia.com/kata.enabled` | `true`\|`false` | Whether Kata Containers runtime is enabled | Labeler |
+## 4. How Do I Customize Drain Behavior? Configure Eviction Modes
 
-#### Exclusion Labels
+**Control how workloads are evicted from failing nodes.**
 
-| Label Key | Value | Purpose | Set By |
-|-----------|-------|---------|--------|
-| `k8saas.nvidia.com/ManagedByNVSentinel` | `false` | Opt-out from NVSentinel management | Cluster operator (manual) |
+The Node Drainer module handles graceful workload eviction from cordoned nodes. Eviction behavior can be customized per namespace to accommodate different workload types and operational requirements.
 
-### Label Lifecycle
+### Eviction Modes
 
-**Labeler Module** manages configuration labels:
-- Watches pod events to detect DCGM pod scheduling
-- Extracts DCGM version from pod image tag
-- Sets driver.installed based on driver probe results
-- Watches node events for Kata runtime detection
+NVSentinel supports three eviction modes:
 
-**Platform Connectors** manages health metadata labels:
-- Sets labels when processing HealthEvents
-- Updates quarantine-status as workflow progresses
+| Mode                 | Behavior                                | Use Case                                                      |
+|----------------------|-----------------------------------------|---------------------------------------------------------------|
+| `Immediate`          | Pod evicted immediately without waiting | Fast failover for stateless workloads                         |
+| `AllowCompletion`    | Wait for pod to gracefully terminate    | Respects terminationGracePeriodSeconds for stateful workloads |
+| `DeleteAfterTimeout` | Wait up to timeout, then force delete   | Long-running jobs that need time to checkpoint                |
 
-**Code Locations:**
-- `labeler/pkg/labeler/labeler.go`
-- `platform-connectors/pkg/connectors/kubernetes/process_node_events.go`
+### Configuration
+
+Configure eviction behavior in Helm values:
+
+```yaml
+# distros/kubernetes/nvsentinel/charts/node-drainer/values.yaml
+# Eviction timeout in seconds for pod eviction operations
+evictionTimeoutInSeconds: "60"
+
+# System namespaces are skipped during drain
+systemNamespaces: "^(nvsentinel|kube-system|gpu-operator|gmp-system|network-operator)$"
+
+# Time after which pods in DeleteAfterTimeout mode will be force deleted
+deleteAfterTimeoutMinutes: 60
+
+# Time after which a pod in NotReady state is considered stuck
+notReadyTimeoutMinutes: 5
+
+# Per-namespace eviction configuration
+userNamespaces:
+  # Default for all user namespaces
+  - name: "*"
+    mode: "AllowCompletion"
+  
+  # Fast failover for stateless web services
+  - name: "web-tier"
+    mode: "Immediate"
+  
+  # Allow ML training jobs to checkpoint before eviction
+  - name: "ml-training"
+    mode: "DeleteAfterTimeout"
+```
+
+### Eviction Workflow
+
+1. **System Namespace Skip**: Pods in system namespaces (kube-system, nvsentinel, etc.) are never evicted
+2. **Mode Selection**: Eviction mode determined by namespace match (most specific wins)
+3. **Graceful Termination**: Respects pod's `terminationGracePeriodSeconds` for `AllowCompletion` mode
+4. **Timeout Handling**: Force deletes stuck or timed-out pods based on configuration
+5. **NotReady Detection**: Automatically force deletes pods stuck in NotReady state beyond threshold
+
+### Example: Multi-Tier Application
+
+```yaml
+userNamespaces:
+  # Critical database - wait for graceful shutdown
+  - name: "database"
+    mode: "AllowCompletion"
+  
+  # Batch processing - allow time for checkpoint
+  - name: "batch-jobs"
+    mode: "DeleteAfterTimeout"
+  
+  # Web frontend - fast failover
+  - name: "frontend"
+    mode: "Immediate"
+  
+  # Default for everything else
+  - name: "*"
+    mode: "AllowCompletion"
+```
+
+**Configuration Location:** `distros/kubernetes/nvsentinel/charts/node-drainer/values.yaml`
+
+---
 
 ## Error Code Mapping Reference
 
@@ -296,199 +629,53 @@ NVSentinel maps DCGM error codes to recommended actions using a canonical CSV fi
 
 ### Recommended Actions
 
-| Action | Meaning | Typical Resolution |
-|--------|---------|-------------------|
-| `RESTART_VM` | Software-recoverable error | Node reboot via janitor |
-| `COMPONENT_RESET` | Hardware reset required | GPU/driver reset |
-| `CONTACT_SUPPORT` | Manual intervention needed | Create support ticket, manual investigation |
-| `IGNORE` | Informational, no action needed | Log for awareness |
-| `NONE` | Health check informational | No action required |
+| Action            | Meaning                         | Typical Resolution                          |
+|-------------------|---------------------------------|---------------------------------------------|
+| `RESTART_VM`      | Software-recoverable error      | Node reboot via janitor                     |
+| `COMPONENT_RESET` | Hardware reset required         | GPU/driver reset                            |
+| `CONTACT_SUPPORT` | Manual intervention needed      | Create support ticket, manual investigation |
+| `IGNORE`          | Informational, no action needed | Log for awareness                           |
+| `NONE`            | Health check informational      | No action required                          |
 
 ### Example Mappings
 
-| DCGM Error Code | Recommended Action | Typical Condition | Typical Taint |
-|-----------------|-------------------|-------------------|---------------|
-| `DCGM_FR_FAULTY_MEMORY` | `CONTACT_SUPPORT` | `GpuMemoryError` | `gpu.health/memory-error` |
-| `DCGM_FR_VOLATILE_DBE_DETECTED` | `COMPONENT_RESET` | `GpuMemoryError` | `gpu.health/memory-error` |
-| `DCGM_FR_NVLINK_DOWN` | `RESTART_VM` | `NVLinkDown` | `nvlink.health/link-down` |
-| `DCGM_FR_NVSWITCH_FATAL_ERROR` | `CONTACT_SUPPORT` | `NVSwitchFatalError` | `nvswitch.health/fatal-error` |
-| `DCGM_FR_CLOCK_THROTTLE_THERMAL` | `IGNORE` | `GpuThermalWatch` | (optional) `gpu.health/thermal-warning` |
-| `DCGM_FR_SXID_ERROR` | `RESTART_VM` | `GpuXidError` | `gpu.health/xid-error` |
+| DCGM Error Code                     | Recommended Action | Typical Condition      |
+|-------------------------------------|--------------------|------------------------|
+| `DCGM_FR_FAULTY_MEMORY`             | `CONTACT_SUPPORT`  | `GpuMemoryError`       |
+| `DCGM_FR_VOLATILE_DBE_DETECTED`     | `COMPONENT_RESET`  | `GpuMemoryError`       |
+| `DCGM_FR_NVLINK_DOWN`               | `RESTART_VM`       | `NVLinkDown`           |
+| `DCGM_FR_NVSWITCH_FATAL_ERROR`      | `CONTACT_SUPPORT`  | `NVSwitchFatalError`   |
+| `DCGM_FR_CLOCK_THROTTLE_THERMAL`    | `IGNORE`           | `GpuThermalWatch`      |
+| `DCGM_FR_SXID_ERROR`                | `RESTART_VM`       | `GpuXidError`          |
 
 Full mapping contains 121 error codes. See CSV file for complete reference.
 
-## Integration Patterns
+---
 
-### Watching for Health Changes
+## Related Documentation
 
-**Monitor specific condition types:**
-```bash
-kubectl get nodes -o json | jq '.items[] | select(.status.conditions[] | select(.type=="GpuMemoryError" and .status=="True")) | .metadata.name'
-```
+- [ADR-003: Rule-Based Node Quarantine](./designs/003-rule-based-node-quarantine.md) - CEL-based quarantine rules
+- [ADR-009: Fault Remediation Triggering](./designs/009-fault-remediation-triggering.md) - Remediation workflow
+- [Data Flow Documentation](./DATA_FLOW.md) - End-to-end event flow
+- [Helm Chart Configuration](../distros/kubernetes/README.md) - Deployment configuration
 
-**Watch for condition changes:**
-```bash
-kubectl get nodes -w -o json | jq -c 'select(.status.conditions[] | select(.type | startswith("Gpu")))'
-```
+---
 
-**Using client-go (Go):**
-```go
-informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-    UpdateFunc: func(oldObj, newObj interface{}) {
-        newNode := newObj.(*corev1.Node)
-        for _, condition := range newNode.Status.Conditions {
-            if strings.HasPrefix(string(condition.Type), "Gpu") && condition.Status == corev1.ConditionTrue {
-                // Handle GPU health issue
-            }
-        }
-    },
-})
-```
+## Node Status Examples
 
-### Tolerating Specific Errors
-
-**Allow pods on nodes with GPU warnings:**
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: gpu-workload
-spec:
-  tolerations:
-    - key: "gpu.health/thermal-warning"
-      operator: "Equal"
-      value: "warning"
-      effect: "PreferNoSchedule"
-```
-
-**Tolerate all GPU health issues (not recommended for production):**
-```yaml
-tolerations:
-  - key: "gpu.health"
-    operator: "Exists"
-```
-
-### Querying Node Health Status
-
-**Find nodes with fatal errors:**
-```bash
-kubectl get nodes -l 'nvsentinel.dgxc.nvidia.com/recommended-action=CONTACT_SUPPORT'
-```
-
-**Find cordoned nodes:**
-```bash
-kubectl get nodes -l 'nvsentinel.dgxc.nvidia.com/quarantine-status=cordoned'
-```
-
-**Find nodes with specific DCGM version:**
-```bash
-kubectl get nodes -l 'nvsentinel.dgxc.nvidia.com/dcgm.version=3.3.5'
-```
-
-### Filtering by Severity
-
-**Find nodes with fatal taints:**
-```bash
-kubectl get nodes -o json | jq '.items[] | select(.spec.taints[]? | select(.value=="fatal")) | .metadata.name'
-```
-
-**Find nodes with degraded state:**
-```bash
-kubectl get nodes -o json | jq '.items[] | select(.spec.taints[]? | select(.value=="degraded")) | .metadata.name'
-```
-
-### External Scheduler Integration
-
-**Custom scheduler predicate:**
-```go
-func filterNodesWithGPUErrors(node *corev1.Node) bool {
-    // Check for GPU error conditions
-    for _, condition := range node.Status.Conditions {
-        if strings.HasPrefix(string(condition.Type), "Gpu") && 
-           condition.Status == corev1.ConditionTrue {
-            return false  // Filter out nodes with GPU errors
-        }
-    }
-    
-    // Check for fatal taints
-    for _, taint := range node.Spec.Taints {
-        if strings.HasPrefix(taint.Key, "gpu.health/") && 
-           taint.Value == "fatal" {
-            return false
-        }
-    }
-    
-    return true
-}
-```
-
-### Monitoring Dashboard Queries
-
-**Prometheus metrics example (if node-exporter is running):**
-```promql
-# Nodes with GPU errors
-count(kube_node_status_condition{condition=~"Gpu.*", status="true"})
-
-# Nodes cordoned by NVSentinel
-count(kube_node_labels{label_nvsentinel_dgxc_nvidia_com_quarantine_status="cordoned"})
-```
-
-## Evolution and Versioning
-
-### Stability Guarantees
-
-**Node Condition Types:**
-- ✅ **Stable:** New condition types may be added in minor versions
-- ❌ **Never Removed:** Condition types are never removed or renamed
-- 🔄 **Deprecation:** If a check is replaced, both old and new conditions are set for 2 releases
-
-**Taint Keys:**
-- ✅ **Prefix Stability:** The `component.health/` structure is stable
-- 🔄 **Key Evolution:** New keys added, old keys deprecated with 2 version grace period
-- ⚠️ **Effect Changes:** Operators can change effects via configuration (not breaking)
-
-**Label Keys:**
-- ✅ **Namespace Protection:** `nvsentinel.dgxc.nvidia.com/` prefix prevents conflicts
-- 🔄 **Additive Only:** New labels added, old labels may be deprecated but not removed
-
-### Version Compatibility
-
-| NVSentinel Version | Condition API Version | Taint API Version | Label API Version |
-|-------------------|----------------------|-------------------|-------------------|
-| v0.1.x - v0.2.x | v1alpha1 | v1alpha1 | v1alpha1 |
-| v0.3.x+ (future) | v1beta1 | v1beta1 | v1beta1 |
-
-### Deprecation Policy
-
-When a condition, taint, or label needs to change:
-
-1. **Announce** deprecation in release notes
-2. **Support** both old and new for 2 minor versions
-3. **Remove** old after 2 version grace period
-4. **Document** migration path in upgrade guide
-
-## Examples
-
-### Example 1: Node with Fatal GPU Memory Error
+### Example 1: Node with Fatal GPU XID Error (With Optional Taint)
 
 ```yaml
 apiVersion: v1
 kind: Node
 metadata:
   name: gpu-node-01
-  labels:
-    nvsentinel.dgxc.nvidia.com/error-code: "DCGM_FR_FAULTY_MEMORY"
-    nvsentinel.dgxc.nvidia.com/recommended-action: "CONTACT_SUPPORT"
-    nvsentinel.dgxc.nvidia.com/quarantine-status: "cordoned"
-    nvsentinel.dgxc.nvidia.com/dcgm.version: "3.3.5"
-    nvsentinel.dgxc.nvidia.com/driver.installed: "true"
-    nvsentinel.dgxc.nvidia.com/health-event-id: "673bac8e9f1234567890abcd"
-    nvsentinel.dgxc.nvidia.com/last-health-check: "2025-11-06T10:05:00Z"
 spec:
-  unschedulable: true  # Cordoned
+  unschedulable: true  # Cordoned (enabled by default)
   taints:
-    - key: "gpu.health/memory-error"
-      value: "fatal"
+    # Optional - only present if configured in rulesets
+    - key: "nvidia.com/gpu-xid-error"
+      value: "true"
       effect: "NoSchedule"
 status:
   conditions:
@@ -496,27 +683,26 @@ status:
       status: "False"
       reason: "GpuHealthCheckFailed"
       message: "GPU health check failed"
-    - type: GpuMemoryError
+    - type: GpuXidError
       status: "True"
       reason: "HardwareFailure"
-      message: "[DCGM_FR_FAULTY_MEMORY] GPU memory failure detected on GPU 0 - RecommendedAction: CONTACT_SUPPORT"
+      message: "[DCGM_FR_SXID_ERROR] GPU XID error detected on GPU 0 - RecommendedAction: RESTART_VM"
       lastTransitionTime: "2025-11-06T10:00:00Z"
 ```
 
-### Example 2: Node with Multiple Non-Fatal Warnings
+### Example 2: Node with Non-Fatal GPU Thermal Issue
 
 ```yaml
 apiVersion: v1
 kind: Node
 metadata:
   name: gpu-node-02
-  labels:
-    nvsentinel.dgxc.nvidia.com/dcgm.version: "3.3.5"
-    nvsentinel.dgxc.nvidia.com/driver.installed: "true"
 spec:
+  # May or may not be cordoned depending on ruleset configuration
   taints:
-    - key: "gpu.health/thermal-warning"
-      value: "warning"
+    # Optional - only present if configured in rulesets
+    - key: "nvidia.com/gpu-thermal"
+      value: "true"
       effect: "PreferNoSchedule"
 status:
   conditions:
@@ -527,25 +713,15 @@ status:
       reason: "ThermalThrottling"
       message: "[DCGM_FR_CLOCK_THROTTLE_THERMAL] GPU thermal throttling detected - RecommendedAction: IGNORE"
       lastTransitionTime: "2025-11-06T10:02:00Z"
-    - type: GpuPowerWatch
-      status: "False"
-      reason: "PowerNormal"
-      message: "GPU power within normal range"
-      lastTransitionTime: "2025-11-06T09:00:00Z"
 ```
 
-### Example 3: Healthy Node with NVSentinel Labels
+### Example 3: Healthy Node
 
 ```yaml
 apiVersion: v1
 kind: Node
 metadata:
   name: gpu-node-03
-  labels:
-    nvsentinel.dgxc.nvidia.com/dcgm.version: "3.3.5"
-    nvsentinel.dgxc.nvidia.com/driver.installed: "true"
-    nvsentinel.dgxc.nvidia.com/kata.enabled: "false"
-    nvsentinel.dgxc.nvidia.com/last-health-check: "2025-11-06T10:10:00Z"
 status:
   conditions:
     - type: Ready
@@ -559,20 +735,21 @@ status:
       status: "False"
       reason: "HealthCheckPassed"
       message: "GPU thermal health check passed"
-      lastTransitionTime: "2025-11-06T10:10:00Z"
+      lastTransitionTime: "2025-11-06:10:10:00Z"
 ```
+
+---
 
 ## Implementation Notes
 
 ### Module Responsibilities
 
-| Module | Responsibility | What It Sets |
-|--------|---------------|--------------|
-| **Platform Connectors** | Process health events, update node status | NodeConditions, health metadata labels |
-| **Fault Quarantine** | Apply operational policies | Taints, cordon status, quarantine-status label |
-| **Labeler** | Maintain configuration metadata | DCGM version, driver status, kata labels |
-| **Node Drainer** | Evict workloads | Updates quarantine-status label to `drained` |
-| **Fault Remediation** | Trigger maintenance | Updates quarantine-status label to `remediation-triggered` |
+| Module                  | Responsibility                            | What It Sets           |
+|-------------------------|-------------------------------------------|------------------------|
+| **Platform Connectors** | Process health events, update node status | NodeConditions         |
+| **Fault Quarantine**    | Apply operational policies                | Taints, cordon status  |
+| **Node Drainer**        | Evict workloads                           | Drain nodes            |
+| **Fault Remediation**   | Trigger maintenance                       | Create maintenance CRs |
 
 ### Configuration Files
 
@@ -584,7 +761,8 @@ status:
 
 - **Condition Setting:** `platform-connectors/pkg/connectors/kubernetes/process_node_events.go`
 - **Taint Application:** `fault-quarantine/pkg/informer/k8s_client.go`
-- **Label Management:** `labeler/pkg/labeler/labeler.go`
+- **Drain Logic:** `node-drainer/pkg/drainer/drainer.go`
+- **Remediation Triggering:** `fault-remediation/pkg/remediation/remediation.go`
 
 ## Related Documentation
 
@@ -607,6 +785,6 @@ To propose changes:
 
 **Document Revision History:**
 
-| Version | Date | Changes |
-|---------|------|---------|
-| 1.0 | 2025-11-06 | Initial version documenting existing conventions |
+| Version | Date       | Changes                                          |
+|---------|------------|--------------------------------------------------|
+| 1.0     | 2025-11-06 | Initial version documenting existing conventions |
