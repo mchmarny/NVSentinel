@@ -61,7 +61,7 @@ tolerations:
 
 ## Architecture
 
-The [DATA_FLOW.md](docs/DATA_FLOW.md) provides more context on this, at the higher level though, NVSentinel detects hardware failures and applies graduated responses via:
+The [DATA_FLOW.md](./DATA_FLOW.md) provides more context on this, at the higher level though, NVSentinel detects hardware failures and applies graduated responses via:
 
 1. **Detection**: Health monitors check GPU, system logs, and cloud maintenance events
 2. **Classification**: Platform connectors validate and set node conditions
