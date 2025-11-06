@@ -734,7 +734,7 @@ status:
       status: "False"
       reason: "HealthCheckPassed"
       message: "GPU thermal health check passed"
-      lastTransitionTime: "2025-11-06:10:10:00Z"
+      lastTransitionTime: "2025-11-06T10:10:00Z"
 ```
 
 ---
