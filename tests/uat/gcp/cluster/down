@@ -17,14 +17,13 @@
 
 set -euo pipefail
 
-DIR="$(dirname "$0")"
-. "${DIR}/cluster-env.sh"
 
-echo "Deleting GKE cluster: $CLUSTER_NAME in region $REGION"
+# Config
+DEPLOYMENT_ID="${DEPLOYMENT_ID:-d1}"
+PROJECT_ID="${PROJECT_ID:-nv-dgxck8s-20250306}"
+CLUSTER_NAME="nvs-${DEPLOYMENT_ID}"
+ZONE="${ZONE:-europe-west4-b}"
 
-# Delete regional GKE cluster
-gcloud container clusters delete "$CLUSTER_NAME" \
-    --region="$REGION" \
-    --quiet
-
-echo "✅ Cluster deletion complete!"
+# Delete the cluster
+gcloud container clusters delete $CLUSTER_NAME --project $PROJECT_ID --zone $ZONE --async --quiet
+echo "✅ Cluster teardown complete!"

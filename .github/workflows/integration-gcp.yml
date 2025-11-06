@@ -32,16 +32,9 @@ jobs:
     timeout-minutes: 30
     env:
       IMAGE_TAG: main-27ca26d
-      TARGET_REG: us-docker.pkg.dev
-      TARGET_REPO: nvsentinel
-      CRANE_VERSION: "0.20.6"
       IDENTITY_PROVIDER: "projects/1015254933832/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
       SERVICE_ACCOUNT: "github-actions-user@nv-dgxck8s-20250306.iam.gserviceaccount.com"
-      PROJECT_ID: "nv-dgxck8s-20250306"
-      CAPACITY_RESERVATION: "projects/nv-dgxcloudprodgsc-20240206/reservations/gsc-a3-megagpu-8g-shared-res-2"
-      REGION: "europe-west4"
-      GPU_NODE_ZONE: "europe-west4-b"
-      GPU_NODE_TYPE: "a3-megagpu-8g"
+
 
     steps:
       # Checkout
@@ -64,18 +57,11 @@ jobs:
           version: '>= 543.0.0'
 
       - name: Create Cluster
-        id: create-cluster
+        id: cluster
         shell: bash
         env:
-          TARGET_REG: "${{ env.TARGET_REG }}/${{ env.PROJECT_ID }}/${{ env.TARGET_REPO }}"
-          GPU_NODE_CAPACITY_RESERVATION: "${{ env.CAPACITY_RESERVATION }}"
-          CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
-          REGION: ${{ env.REGION }}
-          GPU_NODE_ZONE: ${{ env.GPU_NODE_ZONE }}
-          GPU_NODE_TYPE: ${{ env.GPU_NODE_TYPE }}
-        run: |
-          tests/uat/gcp/cluster-up.sh
-          tests/uat/gcp/cluster-pool.sh
+          DEPLOYMENT_ID: ${{ github.run_id }}
+        run: tests/uat/gcp/cluster/up
 
       # Test
       - name: Install NVS
@@ -90,10 +76,9 @@ jobs:
         run: tests/uat/tests.sh
 
       # Teardown
-      # TODO: re-enable once app install is stable
-      # - name: Destroy Cluster
-      #   if: always() && steps.create-cluster.outcome != 'skipped'
-      #   shell: bash
-      #   env:
-      #     CLUSTER_NAME_SUFFIX: ${{ github.run_id }}
-      #   run: tests/uat/gcp/cluster-down.sh
+      - name: Destroy Cluster
+        if: always() && steps.cluster.outcome != 'skipped'
+        shell: bash
+        env:
+          DEPLOYMENT_ID: ${{ github.run_id }}
+        run: tests/uat/gcp/cluster/down

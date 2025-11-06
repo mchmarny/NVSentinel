@@ -1,0 +1,345 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# snapshot-pool.sh
+# Inspect one GKE node pool (zonal OR regional cluster):
+# - Node pool describe
+# - For each backing MIG (regional pools can have multiple):
+#     - MIG describe
+#     - Instance Template (project + name, reservationAffinity, SA, accelerators)
+#     - Fallback to a live instance if the template was GC'd
+#
+# Examples:
+#   Zonal:
+#     tests/uat/gcp/cluster/test --proj nv-dgxck8s-20250306 --cluster nvs-d1 --zone europe-west4-b --pool gpu-pool --out /tmp/one
+#   Regional:
+#     tests/uat/gcp/cluster/test --proj nv-dgxck8s-20250306 --cluster ahfbhagl-dgxc-runai-gcp-ams-stg --region europe-west4 --pool customer-gpu --out /tmp/one
+
+die() { echo "ERROR: $*" >&2; exit 2; }
+need() { command -v "$1" >/dev/null || die "missing dependency: $1"; }
+
+pool_describe_try() {
+  local CLUSTER="$1" ZONE="$2" REGION="$3" POOL="$4" FMT="$5"
+  if [[ -n "$ZONE" ]]; then
+    if gcloud container node-pools describe "$POOL" --cluster "$CLUSTER" --zone "$ZONE" --format="$FMT" >/dev/null 2>&1; then
+      gcloud container node-pools describe "$POOL" --cluster "$CLUSTER" --zone "$ZONE" --format="$FMT"
+      return 0
+    fi
+  fi
+  [[ -n "$REGION" ]] || die "Pool describe with --zone failed and no --region provided."
+  gcloud container node-pools describe "$POOL" --cluster "$CLUSTER" --region "$REGION" --format="$FMT"
+}
+
+# Get MIG URLs backing a pool; try pool describe first, then cluster describe, then YAML parse
+get_igm_urls() {
+  local PROJECT="$1" CLUSTER="$2" ZONE="$3" REGION="$4" POOL="$5" OUTDIR="$6"
+
+  # 1) Try node-pools describe (zonal or regional call handled by pool_describe_try)
+  echo ">>> Attempting pool describe for instanceGroupUrls..." >&2
+  mapfile -t urls < <(pool_describe_try "$CLUSTER" "$ZONE" "$REGION" "$POOL" \
+    'value(instanceGroupUrls[:])' 2>/dev/null | tr ';' '\n' | sed '/^$/d')
+  if [[ ${#urls[@]} -gt 0 ]]; then
+    echo ">>> Found ${#urls[@]} URLs from pool describe" >&2
+    printf '%s\n' "${urls[@]}"
+    return 0
+  fi
+  echo ">>> Pool describe returned no instanceGroupUrls" >&2
+
+  # 2) Try cluster describe projection
+  echo ">>> Attempting cluster describe projection..." >&2
+  if [[ -n "$ZONE" ]]; then
+    mapfile -t urls < <(gcloud container clusters describe "$CLUSTER" --zone "$ZONE" \
+      --format="value(nodePools[NAME=$POOL].instanceGroupUrls[:])" 2>/dev/null | tr ';' '\n' | sed '/^$/d')
+  else
+    mapfile -t urls < <(gcloud container clusters describe "$CLUSTER" --region "$REGION" \
+      --format="value(nodePools[NAME=$POOL].instanceGroupUrls[:])" 2>/dev/null | tr ';' '\n' | sed '/^$/d')
+  fi
+  if [[ ${#urls[@]} -gt 0 ]]; then
+    echo ">>> Found ${#urls[@]} URLs from cluster describe projection" >&2
+    printf '%s\n' "${urls[@]}"
+    return 0
+  fi
+  echo ">>> Cluster describe projection returned no instanceGroupUrls" >&2
+
+  # 3) Last resort: YAML parse of cluster to extract the pool's instanceGroupUrls
+  echo ">>> Attempting YAML parse fallback..." >&2
+  local CL_YAML="$OUTDIR/cluster.yaml"
+  if [[ -n "$ZONE" ]]; then
+    gcloud container clusters describe "$CLUSTER" --zone "$ZONE" --format=yaml > "$CL_YAML"
+  else
+    gcloud container clusters describe "$CLUSTER" --region "$REGION" --format=yaml > "$CL_YAML"
+  fi
+
+  # Debug: check if pool exists in cluster YAML
+  if grep -q "name: $POOL" "$CL_YAML"; then
+    echo ">>> Found pool '$POOL' in cluster YAML" >&2
+  else
+    echo ">>> WARNING: Pool '$POOL' not found in cluster YAML!" >&2
+    echo ">>> Available pools:" >&2
+    grep "^  - name:" "$CL_YAML" | sed 's/^  - /    /' >&2
+  fi
+
+  # Simple awk walker: enter the nodePools entry with name: <POOL>, then collect instanceGroupUrls items
+  mapfile -t urls < <(awk -v POOL="$POOL" '
+    $1=="-"{inPool=0}
+    $1=="name:" && $2==POOL {inPool=1}
+    inPool && $1=="instanceGroupUrls:"{collect=1; next}
+    collect && $1=="-"{gsub("- ",""); print $2}
+    collect && $1!~"^-"{collect=0}
+  ' "$CL_YAML" | sed '/^$/d')
+  
+  if [[ ${#urls[@]} -gt 0 ]]; then
+    echo ">>> Found ${#urls[@]} URLs from YAML parse" >&2
+    printf '%s\n' "${urls[@]}"
+    return 0
+  fi
+  echo ">>> YAML parse returned no instanceGroupUrls" >&2
+
+  # 4) Fallback: Search for instance groups by naming pattern
+  # GKE names MIGs like: gke-<cluster>-<pool>-<hash>
+  echo ">>> Attempting instance group search by name pattern..." >&2
+  local POOL_LOCATIONS POOL_YAML="$OUTDIR/pool.yaml"
+  
+  # Extract locations from pool.yaml if it exists
+  if [[ -f "$POOL_YAML" ]]; then
+    mapfile -t POOL_LOCATIONS < <(awk '/^locations:/,/^[a-z]/ {if ($1 == "-") {gsub("-",""); print $1}}' "$POOL_YAML")
+  fi
+  
+  # Fallback to cluster YAML if pool.yaml didn't have locations
+  if [[ ${#POOL_LOCATIONS[@]} -eq 0 ]]; then
+    mapfile -t POOL_LOCATIONS < <(awk -v POOL="$POOL" '
+      $1=="name:" && $2==POOL {inPool=1}
+      inPool && $1=="locations:" {inLoc=1; next}
+      inLoc && $1=="-" {print $2}
+      inLoc && $1!~"^-" && $1!~"^$" {inLoc=0}
+      $1=="-" && $2=="name:" {inPool=0}
+    ' "$CL_YAML")
+  fi
+  
+  if [[ ${#POOL_LOCATIONS[@]} -eq 0 ]]; then
+    echo ">>> No locations found in pool config" >&2
+    return 0
+  fi
+  
+  echo ">>> Pool locations: ${POOL_LOCATIONS[*]}" >&2
+  
+  for LOC in "${POOL_LOCATIONS[@]}"; do
+    # Try exact pattern first
+    echo ">>> Searching for MIGs in zone $LOC matching pattern gke-$CLUSTER-$POOL-*" >&2
+    mapfile -t migs < <(gcloud compute instance-groups managed list \
+      --project "$PROJECT" \
+      --filter="name~^gke-$CLUSTER-$POOL- AND zone:$LOC" \
+      --format="value(selfLink)" 2>/dev/null || true)
+    
+    if [[ ${#migs[@]} -gt 0 ]]; then
+      echo ">>> Found ${#migs[@]} MIGs in zone $LOC by exact name search" >&2
+      printf '%s\n' "${migs[@]}"
+      continue
+    fi
+    
+    # Try relaxed pattern: gke-*-<pool>-* (handles truncated cluster names)
+    echo ">>> Trying relaxed search: gke-*-$POOL-*" >&2
+    mapfile -t migs < <(gcloud compute instance-groups managed list \
+      --project "$PROJECT" \
+      --filter="name~^gke-.*-$POOL- AND zone:$LOC" \
+      --format="value(selfLink)" 2>/dev/null || true)
+    
+    if [[ ${#migs[@]} -gt 0 ]]; then
+      echo ">>> Found ${#migs[@]} MIGs in zone $LOC by relaxed name search" >&2
+      printf '%s\n' "${migs[@]}"
+    fi
+  done
+}
+
+main() {
+  need gcloud
+
+  local PROJECT="" CLUSTER="" REGION="" ZONE="" POOL="" OUT=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --proj) shift; PROJECT="${1:?}";;
+      --cluster) shift; CLUSTER="${1:?}";;
+      --region) shift; REGION="${1:-}";;
+      --zone) shift; ZONE="${1:-}";;
+      --pool) shift; POOL="${1:?}";;
+      --out) shift; OUT="${1:?}";;
+      -h|--help)
+        cat <<'EOF'
+Usage:
+  ./snapshot-pool.sh --proj PROJECT --cluster CLUSTER (--zone ZONE | --region REGION) --pool POOL --out DIR
+Notes:
+  - Zonal cluster: use --zone
+  - Regional cluster: use --region (script will iterate all MIGs in the pool)
+  - If a template is garbage-collected, we fall back to a live instance (if any).
+EOF
+        exit 0;;
+      *) die "Unknown arg: $1";;
+    esac
+    shift
+  done
+
+  [[ -n "$PROJECT" && -n "$CLUSTER" && -n "$POOL" && -n "$OUT" ]] || die "Missing required args. See --help."
+  [[ -n "$ZONE" || -n "$REGION" ]] || die "Provide --zone or --region."
+
+  mkdir -p "$OUT"
+  echo ">>> Snapshotting $PROJECT / $CLUSTER / $POOL (zone=${ZONE:-"-"}, region=${REGION:-"-"}) → $OUT"
+
+  gcloud config set project "$PROJECT" >/dev/null
+
+  # 1) Node pool (full + brief)
+  pool_describe_try "$CLUSTER" "$ZONE" "$REGION" "$POOL" yaml > "$OUT/pool.yaml"
+
+  pool_describe_try "$CLUSTER" "$ZONE" "$REGION" "$POOL" \
+    'table(name,config.serviceAccount,config.machineType,config.guestAccelerators[].acceleratorType,config.guestAccelerators[].acceleratorCount)' \
+    > "$OUT/pool_brief.txt" || true
+
+  # 2) Gather MIG URLs with resilient fallback
+  mapfile -t IGM_URLS < <(get_igm_urls "$PROJECT" "$CLUSTER" "$ZONE" "$REGION" "$POOL" "$OUT")
+  if [[ ${#IGM_URLS[@]} -eq 0 ]]; then
+    die "No instanceGroupUrls found on node pool (even after cluster fallback)."
+  fi
+
+  # Iterate each MIG
+  local idx=0
+  for IGM_URL in "${IGM_URLS[@]}"; do
+    idx=$((idx+1))
+    local MIG_NAME ZN IT_URI IT_PROJECT IT_NAME TEMPLATE_OK
+    MIG_NAME="$(printf '%s\n' "$IGM_URL" | awk -F/ '{print $NF}')"
+    ZN="$(printf '%s\n' "$IGM_URL" | awk -F/ '{for(i=1;i<=NF;i++) if($i=="zones"){print $(i+1); exit}}')"
+
+    local D="$OUT/mig-$idx-$ZN"
+    mkdir -p "$D"
+
+    echo "MIG[$idx]: $MIG_NAME (zone: $ZN)"
+    echo "$MIG_NAME" > "$D/igm_name.txt"
+
+    # MIG describe
+    gcloud compute instance-groups managed describe "$MIG_NAME" --zone "$ZN" --format=yaml > "$D/igm.yaml"
+
+    # Instance template URI
+    IT_URI="$(gcloud compute instance-groups managed describe "$MIG_NAME" --zone "$ZN" \
+                --format='value(versions[0].instanceTemplate)')"
+    if [[ -z "$IT_URI" ]]; then
+      IT_URI="$(gcloud compute instance-groups managed describe "$MIG_NAME" --zone "$ZN" \
+                  --format='value(instanceTemplate)')"
+    fi
+
+    if [[ -z "$IT_URI" ]]; then
+      echo "No instance template URI on MIG (empty versions[] and instanceTemplate). Skipping template describe." | tee -a "$D/it.yaml"
+      TEMPLATE_OK=false
+    else
+      IT_PROJECT="$(printf '%s\n' "$IT_URI" | awk -F/ '{for(i=1;i<=NF;i++) if($i=="projects"){print $(i+1); exit}}')"
+      IT_NAME="$(printf '%s\n' "$IT_URI" | awk -F/ '{print $NF}')"
+
+      {
+        echo "IT (project): $IT_PROJECT"
+        echo "IT (name):    $IT_NAME"
+      } | tee "$D/it_info.txt"
+
+      # Template describe (quiet if GC'd)
+      if gcloud compute instance-templates describe "$IT_NAME" --project "$IT_PROJECT" \
+            --format='yaml(properties.machineType,properties.guestAccelerators,properties.reservationAffinity,properties.serviceAccounts)' \
+            > "$D/it.yaml" 2>/dev/null; then
+        TEMPLATE_OK=true
+      else
+        TEMPLATE_OK=false
+        echo "Template not found; using instance fallback…" | tee -a "$D/it.yaml"
+      fi
+    fi
+
+    # Brief summary (prefer template; fallback to instance)
+    : > "$D/it_brief.txt"
+    {
+      echo "project: $PROJECT"
+      echo "cluster: $CLUSTER"
+      echo "zone:    $ZN"
+      echo "mig:     $MIG_NAME"
+    } >> "$D/it_brief.txt"
+
+    if [[ "${TEMPLATE_OK:-false}" == "true" ]]; then
+      {
+        echo -n "reservation: "
+        gcloud compute instance-templates describe "$IT_NAME" --project "$IT_PROJECT" \
+          --format='value(properties.reservationAffinity.values[0])' 2>/dev/null || true
+
+        echo -n "reservationKey: "
+        gcloud compute instance-templates describe "$IT_NAME" --project "$IT_PROJECT" \
+          --format='value(properties.reservationAffinity.key)' 2>/dev/null || true
+
+        echo -n "consumeReservationType: "
+        gcloud compute instance-templates describe "$IT_NAME" --project "$IT_PROJECT" \
+          --format='value(properties.reservationAffinity.consumeReservationType)' 2>/dev/null || true
+
+        echo -n "machineType: "
+        gcloud compute instance-templates describe "$IT_NAME" --project "$IT_PROJECT" \
+          --format='value(properties.machineType)' 2>/dev/null || true
+
+        echo -n "guestAccelerators: "
+        gcloud compute instance-templates describe "$IT_NAME" --project "$IT_PROJECT" \
+          --format='value(properties.guestAccelerators[].acceleratorType,properties.guestAccelerators[].acceleratorCount)' 2>/dev/null || true
+
+        echo -n "serviceAccount: "
+        gcloud compute instance-templates describe "$IT_NAME" --project "$IT_PROJECT" \
+          --format='value(properties.serviceAccounts[0].email)' 2>/dev/null || true
+      } >> "$D/it_brief.txt"
+    else
+      # Instance fallback
+      local INST
+      INST="$(gcloud compute instance-groups managed list-instances "$MIG_NAME" --zone "$ZN" \
+                --format='value(name)' --limit=1 2>/dev/null || true)"
+      if [[ -n "$INST" ]]; then
+        echo ">>> Using instance fallback: $INST" >&2
+        
+        gcloud compute instances describe "$INST" --zone "$ZN" \
+          --format='yaml(machineType,guestAccelerators,reservationAffinity,serviceAccounts,tags)' \
+          > "$D/instance_fallback.yaml"
+
+        {
+          echo "fallback_from_instance: $INST"
+          echo -n "reservation: "
+          gcloud compute instances describe "$INST" --zone "$ZN" \
+            --format='value(reservationAffinity.specificReservation.keyReservations[0].name)' 2>/dev/null || true
+
+          echo -n "machineType: "
+          gcloud compute instances describe "$INST" --zone "$ZN" \
+            --format='value(machineType.basename())' 2>/dev/null || true
+
+          echo -n "guestAccelerators: "
+          gcloud compute instances describe "$INST" --zone "$ZN" \
+            --format='value(guestAccelerators[].acceleratorType,guestAccelerators[].acceleratorCount)' 2>/dev/null || true
+
+          echo -n "serviceAccount: "
+          gcloud compute instances describe "$INST" --zone "$ZN" \
+            --format='value(serviceAccounts[0].email)' 2>/dev/null || true
+        } >> "$D/it_brief.txt"
+      else
+        echo "No live instances in MIG; cannot fallback." | tee -a "$D/it_brief.txt"
+      fi
+    fi
+
+    # Optional: dump reservation in consumer project for quick view
+    local RES_NAME
+    RES_NAME="$(sed -n 's/^reservation: //p' "$D/it_brief.txt" | head -n1 || true)"
+    RES_NAME="${RES_NAME:-}"
+    if [[ -n "$RES_NAME" ]]; then
+      gcloud compute reservations describe "$RES_NAME" --zone "$ZN" \
+        --project "$PROJECT" \
+        --format='yaml(name,zone,shareSettings,
+                       specificReservation.instanceProperties.machineType,
+                       specificReservation.instanceProperties.guestAccelerators,
+                       specificReservation.count,specificReservation.inUseCount)' 2>/dev/null \
+        > "$D/reservation_describe.txt" || true
+    fi
+  done
+
+  echo
+  echo "===== SUMMARY ====="
+  find "$OUT" -maxdepth 2 -name it_brief.txt -print -exec cat {} \;
+
+  echo
+  echo "Files written under: $OUT"
+  echo "  pool.yaml, pool_brief.txt"
+  echo "  mig-*/igm.yaml, it.yaml or instance_fallback.yaml, it_brief.txt, reservation_describe.txt"
+}
+
+main "$@"
