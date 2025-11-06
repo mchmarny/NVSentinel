@@ -129,7 +129,6 @@ NVSentinel's test suite demonstrates these taint configurations:
 
 | Taint Key                       | Value  | Effect       | Use Case                    |
 |---------------------------------|--------|--------------|
-|-----------------------------|
 | `nvidia.com/gpu-xid-error`      | `true` | `NoSchedule` | GPU XID critical errors     |
 | `nvidia.com/gpu-nvlink-error`   | `true` | `NoSchedule` | NVLink connection failures  |
 | `nvidia.com/syslog-xid-error`   | `true` | `NoSchedule` | Syslog-detected XID errors  |
