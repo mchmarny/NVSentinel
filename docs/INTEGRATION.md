@@ -1,6 +1,6 @@
 # NVSentinel Integration Guide
 
-NVSentinel detects GPU and hardware failures and exposes them using standard Kubernetes primitives. This document provides high level overview of how to integrate with NVSentinel for scheduling, monitoring, and remediation purposes. 
+NVSentinel detects GPU and hardware failures and exposes them using standard Kubernetes primitives. This document provides a high level overview of how to integrate with NVSentinel for scheduling, monitoring, and remediation purposes. 
 
 ### Integration Model
 
