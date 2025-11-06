@@ -32,7 +32,7 @@ if [[ "$GPU_NODE_COUNT" -gt 0 ]]; then
     
     # Base command for GPU instances
     # Note: A3 instances have 8x H100-80GB GPUs pre-attached
-    # DO NOT use --accelerator flag - GPUs are part of the machine type
+    # GPU driver installation is DISABLED because A3 instances come with drivers pre-installed
     # --node-locations specifies the zone(s) where nodes will be created (must match capacity reservation zone)
     # --placement-type=COMPACT required for A3 instances with PERIODIC maintenance
     # --service-account must match the working pool's service account
@@ -48,7 +48,7 @@ if [[ "$GPU_NODE_COUNT" -gt 0 ]]; then
             --local-nvme-ssd-block=count=16
             --image-type="COS_CONTAINERD"
             --num-nodes="$GPU_NODE_COUNT"
-            --scopes="https://www.googleapis.com/auth/cloud-platform"
+            --scopes="https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/cloud-platform"
             --workload-metadata=GKE_METADATA
             --enable-gvnic
             --node-taints="dedicated=user-workload:NoExecute"
@@ -57,6 +57,7 @@ if [[ "$GPU_NODE_COUNT" -gt 0 ]]; then
             --shielded-secure-boot
             --shielded-integrity-monitoring
             --placement-type=COMPACT
+            --accelerator="type=nvidia-h100-mega-80gb,count=8,gpu-driver-version=DISABLED"
     )
     
     # Add capacity reservation only if specified
