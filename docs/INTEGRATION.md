@@ -159,10 +159,10 @@ rulesets:
         - kind: "HealthEvent"
           expression: 'event.checkName == "GpuXidError" && event.isFatal == true'
     # Uncomment to enable tainting:
-    taint:
-      key: "nvidia.com/gpu-xid-error"  # Choose your own key format
-      value: "true"                    # Or use "fatal", "degraded", etc.
-      effect: "NoSchedule"
+    #taint:
+    #  key: "nvidia.com/gpu-xid-error"  # Choose your own key format
+    # value: "true"                    # Or use "fatal", "degraded", etc.
+    # effect: "NoSchedule"
     cordon:
       shouldCordon: true  # Enabled by default
 ```
