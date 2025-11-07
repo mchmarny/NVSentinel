@@ -81,7 +81,7 @@ The [DATA_FLOW.md](./DATA_FLOW.md) provides more context on this, at the higher 
            │
            ▼
 ┌─────────────────────┐
-│ Fault Quarantine    │ Apply Taints (node is bad)
+│ Fault Quarantine    │ Apply Cordon/Taints (node is bad)
 └──────────┬──────────┘
            │
            ▼
