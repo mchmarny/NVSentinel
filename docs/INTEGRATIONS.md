@@ -95,8 +95,6 @@ The [DATA_FLOW.md](./DATA_FLOW.md) provides more context on this, at the higher 
 └─────────────────────┘
 ```
 
----
-
 ## 1. Is a Node Bad? Check Taints
 
 **Use taints for all scheduling and automation decisions.**
@@ -225,8 +223,6 @@ informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
     },
 })
 ```
-
----
 
 ## 2. Why is a Node Bad? Check Node Conditions
 
@@ -461,8 +457,6 @@ informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 })
 ```
 
----
-
 ## 3. Can I Use My Own Remediation? Provide a Custom Resource
 
 **NVSentinel triggers external systems by creating Kubernetes Custom Resources.**
@@ -656,8 +650,6 @@ This prevents duplicate remediation requests for nodes with ongoing maintenance.
 
 **Configuration Location:** `distros/kubernetes/nvsentinel/charts/fault-remediation/values.yaml`
 
----
-
 ## 4. How Do I Customize Drain Behavior? Configure Eviction Modes
 
 **Control how workloads are evicted from failing nodes.**
@@ -738,8 +730,6 @@ userNamespaces:
 
 **Configuration Location:** `distros/kubernetes/nvsentinel/charts/node-drainer/values.yaml`
 
----
-
 ## Error Code Mapping Reference
 
 NVSentinel maps DCGM error codes to recommended actions using a canonical CSV file.
@@ -769,7 +759,6 @@ NVSentinel maps DCGM error codes to recommended actions using a canonical CSV fi
 
 Full mapping contains 121 error codes. See CSV file for complete reference.
 
----
 
 ## Related Documentation
 
@@ -777,8 +766,6 @@ Full mapping contains 121 error codes. See CSV file for complete reference.
 - [ADR-009: Fault Remediation Triggering](./designs/009-fault-remediation-triggering.md) - Remediation workflow
 - [Data Flow Documentation](./DATA_FLOW.md) - End-to-end event flow
 - [Helm Chart Configuration](../distros/kubernetes/README.md) - Deployment configuration
-
----
 
 ## Node Status Examples
 
@@ -857,8 +844,6 @@ status:
       lastTransitionTime: "2025-11-06T10:10:00Z"
 ```
 
----
-
 ## Implementation Notes
 
 ### Module Responsibilities
@@ -899,11 +884,3 @@ To propose changes:
 2. Discuss impact on external integrations
 3. Follow the versioning and deprecation guidelines
 4. Update this document as part of the PR
-
----
-
-**Document Revision History:**
-
-| Version | Date       | Changes                                          |
-|---------|------------|--------------------------------------------------|
-| 1.0     | 2025-11-06 | Initial version documenting existing conventions |
