@@ -128,7 +128,7 @@ nvswitch.health/fatal-error
 NVSentinel's test suite demonstrates these taint configurations:
 
 | Taint Key                       | Value  | Effect       | Use Case                    |
-|---------------------------------|--------|--------------|
+|---------------------------------|--------|--------------|-----------------------------|
 | `nvidia.com/gpu-xid-error`      | `true` | `NoSchedule` | GPU XID critical errors     |
 | `nvidia.com/gpu-nvlink-error`   | `true` | `NoSchedule` | NVLink connection failures  |
 | `nvidia.com/syslog-xid-error`   | `true` | `NoSchedule` | Syslog-detected XID errors  |
@@ -138,10 +138,10 @@ You can configure any taint keys/values in your rulesets based on your needs.
 
 ### Taint Effect Guidelines
 
-| Effect              | Use Case                         | Impact                                          |
-|---------------------|----------------------------------|-------------------------------------------------|
-| `NoSchedule`        | Fatal errors requiring remediation | New pods without toleration won't be scheduled |
-| `PreferNoSchedule`  | Degraded state or warnings       | Scheduler tries to avoid but will schedule if necessary |
+| Effect              | Use Case                         | Impact                                                     |
+|---------------------|----------------------------------|------------------------------------------------------------|
+| `NoSchedule`        | Fatal errors requiring remediation | New pods without toleration won't be scheduled           |
+| `PreferNoSchedule`  | Degraded state or warnings       | Scheduler tries to avoid but will schedule if necessary    |
 | `NoExecute`         | Immediate evacuation needed      | Existing pods without toleration are evicted (rarely used) |
 
 ### Configuring Taints
