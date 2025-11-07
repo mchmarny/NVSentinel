@@ -234,12 +234,127 @@ informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 
 While taints tell you "this node is bad", conditions tell you *why* it's bad. Use conditions for dashboards, alerts, and troubleshooting.
 
+### Monitoring with kube-state-metrics
+
+**Prerequisites:** Install [kube-state-metrics](https://github.com/kubernetes/kube-state-metrics) to expose node conditions as Prometheus metrics. NVSentinel sets node conditions via the Kubernetes API, but kube-state-metrics is required to convert these into metrics.
+
+**Available Metrics:**
+
+```promql
+# Monitor specific GPU health conditions
+kube_node_status_condition{condition="GpuMemWatch",status="true"} == 1
+kube_node_status_condition{condition="GpuNvlinkWatch",status="true"} == 1
+kube_node_status_condition{condition="SysLogsXIDError",status="true"} == 1
+
+# Count unhealthy GPU nodes
+count(kube_node_status_condition{condition=~"Gpu.*|SysLogs.*",status="true"})
+
+# Alert on any GPU or syslog condition
+kube_node_status_condition{condition=~"Gpu.*|SysLogs.*",status="true"}
+```
+
+**Example Prometheus Alert:**
+
+```yaml
+- alert: GPUNodeUnhealthy
+  expr: |
+    kube_node_status_condition{condition=~"Gpu.*",status="true"} == 1
+  for: 5m
+  labels:
+    severity: critical
+  annotations:
+    summary: "GPU node {{ $labels.node }} has condition {{ $labels.condition }}"
+    description: "Node {{ $labels.node }} is unhealthy due to {{ $labels.condition }}"
+```
+
+**Grafana Dashboard Query:**
+
+```promql
+# Show all nodes with active GPU health conditions
+kube_node_status_condition{condition=~"Gpu.*|SysLogs.*",status="true"}
+```
+
+> **Note:** NVSentinel also exposes its own Prometheus metrics for internal operations. See [METRICS.md](METRICS.md) for the complete list of NVSentinel-native metrics.
+
 ### Condition Structure
 
 Platform Connectors set NodeConditions based on health monitor checks. Each condition explains what hardware component failed.
 
 **Naming:** PascalCase, directly from health monitor check names  
-**Examples:** `GpuMemoryError`, `NVLinkDown`, `GpuThermalWatch`, `CSPMaintenance`
+**Examples:** `GpuMemWatch`, `GpuThermalWatch`, `SysLogsXIDError`
+
+### Condition vs Event Behavior
+
+NVSentinel uses different Kubernetes primitives based on error severity:
+
+| Error Type                      | Condition Set          | Event Created? | Use Case                                         |
+|---------------------------------|------------------------|----------------|--------------------------------------------------|
+| **Fatal** (`isFatal=true`)      | ✅ Yes (`status=True`)  | ❌ No          | Critical errors requiring quarantine/remediation |
+| **Non-Fatal** (`isFatal=false`) | ❌ No                   | ✅ Yes         | Warnings, transient issues, informational        |
+| **Healthy** (`isHealthy=true`)  | ✅ Yes (`status=False`) | ❌ No          | Health recovery, condition cleared               |
+
+**Why this design?**
+- **Conditions** are durable state - used for errors that require action (cordon, drain, remediation)
+- **Events** are transient notifications - used for warnings and non-critical issues that don't require node isolation
+
+### Using Events for Non-Fatal Errors
+
+Non-fatal errors (like thermal throttling warnings or transient issues) create Kubernetes Events instead of node conditions. This prevents alert fatigue while still providing visibility.
+
+**View recent events for a node:**
+```shell
+kubectl get events --field-selector involvedObject.kind=Node,involvedObject.name=gpu-node-01 \
+  --sort-by='.lastTimestamp'
+```
+
+**Filter for GPU-related events:**
+```shell
+kubectl get events --all-namespaces \
+  -o json | jq '.items[] | select(.type | startswith("Gpu") or startswith("SysLogs"))'
+```
+
+**Watch for real-time events:**
+```shell
+kubectl get events --watch --field-selector involvedObject.kind=Node
+```
+
+**Example non-fatal event:**
+```yaml
+apiVersion: v1
+kind: Event
+metadata:
+  name: gpu-node-01.17a3b2c4d5e6f7
+  namespace: default
+involvedObject:
+  kind: Node
+  name: gpu-node-01
+reason: Warning
+message: "[DCGM_FR_CLOCK_THROTTLE_THERMAL] GPU thermal throttling detected - RecommendedAction: IGNORE"
+type: GpuThermalWatch
+source:
+  component: gpu-health-monitor
+  host: gpu-node-01
+firstTimestamp: "2025-11-06T10:05:00Z"
+lastTimestamp: "2025-11-06T10:05:00Z"
+count: 1
+```
+
+**Integration patterns for events:**
+
+```go
+// Watch for non-fatal GPU events
+eventInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+    AddFunc: func(obj interface{}) {
+        event := obj.(*corev1.Event)
+        if event.InvolvedObject.Kind == "Node" && 
+           (strings.HasPrefix(event.Type, "Gpu") || strings.HasPrefix(event.Type, "SysLogs")) {
+            // Log warning, update dashboard, etc.
+            log.Printf("Non-fatal issue on %s: %s", 
+                event.InvolvedObject.Name, event.Message)
+        }
+    },
+})
+```
 
 ### Condition Status
 
@@ -270,20 +385,25 @@ conditions:
 
 ### Standard Condition Types
 
-#### GPU Conditions
+#### GPU Conditions (from GPU Health Monitor - DCGM)
 
-- `GpuMemoryError` - GPU memory failures (ECC errors, faulty memory)
+- `GpuMemWatch` - GPU memory failures (ECC errors, faulty memory)
 - `GpuThermalWatch` - Thermal throttling or temperature violations
 - `GpuPcieWatch` - PCIe link issues (replay rate, bandwidth)
-- `GpuXidError` - GPU XID critical errors
 - `GpuPowerWatch` - Power-related issues
-- `GpuInforomCorrupt` - Inforom corruption detected
+- `GpuInforomWatch` - Inforom corruption detected
+- `GpuSmWatch` - Streaming Multiprocessor errors
+- `GpuNvlinkWatch` - NVLink connection failures
+- `GpuMcuWatch` - Microcontroller unit errors
+- `GpuPmuWatch` - Power management unit errors
+- `GpuDriverWatch` - GPU driver errors
+- `GpuCpusetWatch` - CPU affinity issues
 
-#### NVLink Conditions
+#### Syslog Conditions (from Syslog Health Monitor)
 
-- `NVLinkDown` - NVLink connection down
-- `NVLinkCrcError` - NVLink CRC error threshold exceeded
-- `NVLinkErrorCritical` - Critical NVLink errors
+- `SysLogsXIDError` - GPU XID errors detected in system logs
+- `SysLogsSXIDError` - NVSwitch SXID errors detected in system logs
+- `SysLogsGPUFallenOff` - GPU fallen off bus errors detected in system logs
 
 #### NVSwitch Conditions
 
@@ -303,7 +423,7 @@ conditions:
 
 ```shell
 kubectl get nodes -o json | jq '.items[] 
-  | select(.status.conditions[] | select(.type=="GpuMemoryError" and .status=="True")) 
+  | select(.status.conditions[] | select(.type=="GpuMemWatch" and .status=="True")) 
   | .metadata.name'
 ```
 
@@ -320,7 +440,7 @@ groups:
   - name: nvsentinel
     rules:
       - alert: GpuMemoryError
-        expr: kube_node_status_condition{condition="GpuMemoryError",status="true"} == 1
+        expr: kube_node_status_condition{condition="GpuMemWatch",status="true"} == 1
         annotations:
           summary: "GPU memory error on {{ $labels.node }}"
 ```
@@ -682,7 +802,7 @@ status:
       status: "False"
       reason: "GpuHealthCheckFailed"
       message: "GPU health check failed"
-    - type: GpuXidError
+    - type: SysLogsXIDError
       status: "True"
       reason: "HardwareFailure"
       message: "[DCGM_FR_SXID_ERROR] GPU XID error detected on GPU 0 - RecommendedAction: RESTART_VM"
@@ -725,7 +845,7 @@ status:
   conditions:
     - type: Ready
       status: "True"
-    - type: GpuMemoryError
+    - type: GpuMemWatch
       status: "False"
       reason: "HealthCheckPassed"
       message: "GPU memory health check passed"
@@ -772,7 +892,7 @@ status:
 
 ## Contributing
 
-This document describes the stable API contract for NVSentinel node health signaling. Changes to condition types, taint keys, or label keys require review and follow the deprecation policy.
+This document describes the proposed API contract for NVSentinel node health signaling. Changes to condition types, taint keys, or label keys require review and follow the deprecation policy.
 
 To propose changes:
 1. Open an issue describing the use case
