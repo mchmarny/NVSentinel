@@ -123,7 +123,7 @@ nvlink.health/link-down
 nvswitch.health/fatal-error
 ```
 
-### Default Taint Examples (From Test Suite)
+### Default Taint Examples
 
 NVSentinel's test suite demonstrates these taint configurations:
 
