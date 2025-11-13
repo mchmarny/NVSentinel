@@ -107,6 +107,7 @@ gcloud container node-pools create "${GPU_NODE_POOL_NAME}" \
   --disk-type "${GPU_DISK_TYPE}" \
   --disk-size "${GPU_DISK_SIZE_GB}" \
   --accelerator "type=nvidia-h100-mega-80gb,count=8,gpu-driver-version=default" \
+  --opportunistic-maintenance "node-idle-time=1800s,window=2419200s,min-nodes=1" \
   --service-account "gke-cluster-kubernetes@${PROJECT_ID}.iam.gserviceaccount.com" \
   --enable-gvnic \
   --workload-metadata "GKE_METADATA" \
