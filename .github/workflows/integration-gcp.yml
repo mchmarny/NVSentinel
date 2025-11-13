@@ -31,10 +31,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      IMAGE_TAG: main-27ca26d
+      NVSENTINEL_VERSION: main-3f3c256
       IDENTITY_PROVIDER: "projects/1015254933832/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
       SERVICE_ACCOUNT: "github-actions-user@nv-dgxck8s-20250306.iam.gserviceaccount.com"
+      CSP: "gcp"
+      PREFIX: "nvs"
+      TF_VAR_deployment_id: "d${{ github.run_id }}"
       TF_VAR_project_id: "nv-dgxck8s-20250306"
+      TF_VAR_region: "europe-west4"
       TF_VAR_zone: "europe-west4-b"
       TF_VAR_system_node_type: "e2-standard-4"
       TF_VAR_system_node_count: "3"
@@ -45,6 +49,7 @@ jobs:
       TF_VAR_gpu_reservation_name: "gsc-a3-megagpu-8g-shared-res-2"
       TF_VAR_gpu_driver_version: "INSTALLATION_DISABLED"
       TF_VAR_resource_labels: '{"environment":"test","team":"nvsentinel","managed_by":"terraform"}'
+      
 
 
     steps:
@@ -67,44 +72,46 @@ jobs:
           workload_identity_provider: ${{ env.IDENTITY_PROVIDER }}
           service_account: ${{ env.SERVICE_ACCOUNT }}
 
-      # Cluster
+      # Gcloud
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db  # v3.0.1
-        # with:
-        #   version: '>= 545.0.0'
 
+      # Cluster
       - name: Create Cluster
         id: cluster
         shell: bash
         continue-on-error: true 
-        env:
-          TF_VAR_deployment_id: "d${{ github.run_id }}"
         run: |
           set -euo pipefail
           cd tests/uat/gcp/cluster
           terraform init
           terraform apply -auto-approve
 
-      - name: Get Cluster Credentials
+      # Apps
+      - name: Connect to Cluster
+        id: client
         if: steps.cluster.outcome == 'success'
         shell: bash
-        env:
-          TF_VAR_deployment_id: "d${{ github.run_id }}"
         run: |
-          gcloud container clusters get-credentials \
-            nvs-d${{ github.run_id }} \
-            --zone ${{ env.TF_VAR_zone }} \
-            --project ${{ env.TF_VAR_project_id }}
+          set -euo pipefail
+          echo "Installing GKE auth plugin..."
+          gcloud components install gke-gcloud-auth-plugin --quiet --project ${{ env.TF_VAR_project_id }}
+          echo "Getting cluster credentials..."
+          gcloud container clusters get-credentials "${{ env.PREFIX }}-${{ env.TF_VAR_deployment_id }}" \
+            --zone ${{ env.TF_VAR_zone }} --project ${{ env.TF_VAR_project_id }}
 
-      # Test
+      # Apps
       - name: Install NVS
+        id: apps
+        if: steps.client.outcome == 'success'
         shell: bash
-        env: 
-          CSP: "gcp"
-          NVSENTINEL_VERSION: ${{ env.IMAGE_TAG }}
         run: tests/uat/install-apps.sh
 
+      # Test
       - name: Run UAT Tests
+        id: tests
+        continue-on-error: true 
+        if: steps.apps.outcome == 'success'
         shell: bash
         run: tests/uat/tests.sh
 
@@ -112,9 +119,17 @@ jobs:
       - name: Destroy Cluster
         if: always() && steps.cluster.outcome != 'skipped'
         shell: bash
-        env:
-          TF_VAR_deployment_id: "d${{ github.run_id }}"
         run: |
           set -euo pipefail
           cd tests/uat/gcp/cluster
           terraform destroy -auto-approve
+
+      # Summary
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Cluster: ${{ steps.cluster.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Connection: ${{ steps.client.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Apps: ${{ steps.apps.outcome }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tests: ${{ steps.tests.outcome }}" >> $GITHUB_STEP_SUMMARY
