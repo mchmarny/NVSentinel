@@ -36,6 +36,7 @@ jobs:
       SERVICE_ACCOUNT: "github-actions-user@nv-dgxck8s-20250306.iam.gserviceaccount.com"
       CSP: "gcp"
       PREFIX: "nvs"
+      SKIP_DELETE: "true"  # for debugging, skip cluster deletion
       TF_VAR_deployment_id: "d${{ github.run_id }}"
       TF_VAR_project_id: "nv-dgxck8s-20250306"
       TF_VAR_region: "europe-west4"
@@ -115,7 +116,7 @@ jobs:
 
       # Teardown
       - name: Destroy Cluster
-        if: always() && steps.cluster.outcome != 'skipped'
+        if: always() && steps.cluster.outcome != 'skipped' && env.SKIP_DELETE != 'true'
         shell: bash
         run: |
           set -euo pipefail

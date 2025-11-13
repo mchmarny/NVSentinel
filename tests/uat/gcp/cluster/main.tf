@@ -153,7 +153,7 @@ resource "google_container_node_pool" "gpu_pool" {
       type  = "nvidia-h100-mega-80gb"
       count = 8
       gpu_driver_installation_config {
-        gpu_driver_version = var.gpu_driver_version
+        gpu_driver_version = var.gpu_driver_version  # "DEFAULT" for auto-install, "INSTALLATION_DISABLED" for manual
       }
     }
 
