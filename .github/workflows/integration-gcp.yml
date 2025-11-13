@@ -27,19 +27,36 @@ permissions:
   id-token: write
 
 jobs:
-  copy-images:
+  integration-test-gcp:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       IMAGE_TAG: main-27ca26d
       IDENTITY_PROVIDER: "projects/1015254933832/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
       SERVICE_ACCOUNT: "github-actions-user@nv-dgxck8s-20250306.iam.gserviceaccount.com"
+      TF_VAR_project_id: "nv-dgxck8s-20250306"
+      TF_VAR_zone: "europe-west4-b"
+      TF_VAR_system_node_type: "e2-standard-4"
+      TF_VAR_system_node_count: "3"
+      TF_VAR_gpu_node_pool_name: "gpu-pool"
+      TF_VAR_gpu_machine_type: "a3-megagpu-8g"
+      TF_VAR_gpu_node_count: "1"
+      TF_VAR_gpu_reservation_project: "nv-dgxcloudprodgsc-20240206"
+      TF_VAR_gpu_reservation_name: "gsc-a3-megagpu-8g-shared-res-2"
+      TF_VAR_gpu_driver_version: "INSTALLATION_DISABLED"
+      TF_VAR_resource_labels: '{"environment":"test","team":"nvsentinel","managed_by":"terraform"}'
 
 
     steps:
       # Checkout
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+
+      # Terraform
+      - name: Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd  # v3.1.2
+        with:
+          terraform_version: "1.13.5"
 
       # Auth
       - name: Get AuthN Token
@@ -59,9 +76,25 @@ jobs:
       - name: Create Cluster
         id: cluster
         shell: bash
+        continue-on-error: true 
         env:
-          DEPLOYMENT_ID: ${{ github.run_id }}
-        run: tests/uat/gcp/cluster/up
+          TF_VAR_deployment_id: "d${{ github.run_id }}"
+        run: |
+          set -euo pipefail
+          cd tests/uat/gcp/cluster
+          terraform init
+          terraform apply -auto-approve
+
+      - name: Get Cluster Credentials
+        if: steps.cluster.outcome == 'success'
+        shell: bash
+        env:
+          TF_VAR_deployment_id: "d${{ github.run_id }}"
+        run: |
+          gcloud container clusters get-credentials \
+            nvs-d${{ github.run_id }} \
+            --zone ${{ env.TF_VAR_zone }} \
+            --project ${{ env.TF_VAR_project_id }}
 
       # Test
       - name: Install NVS
@@ -80,5 +113,8 @@ jobs:
         if: always() && steps.cluster.outcome != 'skipped'
         shell: bash
         env:
-          DEPLOYMENT_ID: ${{ github.run_id }}
-        run: tests/uat/gcp/cluster/down
+          TF_VAR_deployment_id: "d${{ github.run_id }}"
+        run: |
+          set -euo pipefail
+          cd tests/uat/gcp/cluster
+          terraform destroy -auto-approve
