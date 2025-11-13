@@ -50,8 +50,6 @@ jobs:
       TF_VAR_gpu_driver_version: "INSTALLATION_DISABLED"
       TF_VAR_resource_labels: '{"environment":"test","team":"nvsentinel","managed_by":"terraform"}'
       
-
-
     steps:
       # Checkout
       - name: Checkout
@@ -87,7 +85,7 @@ jobs:
           terraform init
           terraform apply -auto-approve
 
-      # Apps
+      # Connect
       - name: Connect to Cluster
         id: client
         if: steps.cluster.outcome == 'success'
