@@ -22,14 +22,14 @@ dcgm:
   enabled: true
 
 driver:
-  enabled: false                    # GKE pre-installs drivers (Google DS)
+  enabled: true
 
 toolkit:
   enabled: true
   installDir: /home/kubernetes/bin/nvidia
 
 devicePlugin:
-  enabled: false                    # GKE pre-installs device plugin
+  enabled: false
 
 dcgmExporter:
   enabled: true
@@ -39,7 +39,7 @@ operator:
   runtimeClass: ""
 
 gfd:
-  enabled: false                    # GKE sets GPU labels automatically
+  enabled: true
 
 cdi:
   enabled: true
