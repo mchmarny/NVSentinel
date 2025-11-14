@@ -156,10 +156,6 @@ install_gpu_operator() {
     if [[ "$CSP" == "gcp" ]]; then
         log "Applying resource quota for GPU Operator on GCP..."
         kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f -
-        log "Applying GCP COS GPU driver DaemonSet..."
-        kubectl apply -f $GCP_COS_GPU_DS || {
-            error "Failed to apply GCP COS GPU driver DaemonSet"
-        }
         if ! kubectl apply -f "$RESOURCE_QUOTA_RESOURCE" -n gpu-operator; then
             error "Failed to apply resource quota for GPU Operator"
         fi
