@@ -48,7 +48,7 @@ jobs:
       TF_VAR_gpu_node_count: "1"
       TF_VAR_gpu_reservation_project: "nv-dgxcloudprodgsc-20240206"
       TF_VAR_gpu_reservation_name: "gsc-a3-megagpu-8g-shared-res-2"
-      TF_VAR_gpu_driver_version: "INSTALLATION_DISABLED"
+      TF_VAR_gpu_driver_version: "DEFAULT"
       TF_VAR_resource_labels: '{"environment":"test","team":"nvsentinel","managed_by":"terraform"}'
       
     steps:

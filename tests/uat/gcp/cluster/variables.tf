@@ -111,7 +111,7 @@ variable "gpu_reservation_name" {
 variable "gpu_driver_version" {
   description = "GPU driver installation version (DEFAULT for auto-install, INSTALLATION_DISABLED for manual via GPU Operator)"
   type        = string
-  default     = "INSTALLATION_DISABLED"
+  default     = "DEFAULT"
 }
 
 # Image configuration
