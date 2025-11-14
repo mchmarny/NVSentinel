@@ -197,7 +197,7 @@ resource "google_container_node_pool" "gpu_pool" {
     }
 
     shielded_instance_config {
-      enable_secure_boot          = true
+      enable_secure_boot          = false
       enable_integrity_monitoring = true
     }
 
