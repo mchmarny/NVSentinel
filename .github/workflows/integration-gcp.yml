@@ -109,7 +109,6 @@ jobs:
       # Test
       - name: Run UAT Tests
         id: tests
-        continue-on-error: true 
         if: steps.apps.outcome == 'success'
         shell: bash
         run: tests/uat/tests.sh

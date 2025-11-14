@@ -148,6 +148,11 @@ resource "google_container_node_pool" "gpu_pool" {
     disk_type    = var.gpu_disk_type
     disk_size_gb = var.gpu_disk_size_gb
 
+    # Node labels
+    labels = {
+      workload-type = "gpu"
+    }
+
     # GPU configuration
     guest_accelerator {
       type  = "nvidia-h100-mega-80gb"
