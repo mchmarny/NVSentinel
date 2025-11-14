@@ -17,27 +17,36 @@
 # 
 # This file is kept for reference but the install script now skips GPU Operator for CSP=gcp
 # See: https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers
+
 dcgm:
   enabled: true
 
 driver:
-  enabled: false                    # GKE pre-installs drivers
+  enabled: false                    # GKE pre-installs drivers (Google DS)
 
 toolkit:
-  enabled: true                     # Only install NVIDIA Container Toolkit if needed
+  enabled: true
+  installDir: /home/kubernetes/bin/nvidia
 
 devicePlugin:
   enabled: false                    # GKE pre-installs device plugin
 
-dcgmExporter:                       # Enable DCGM exporter for GPU monitoring
+dcgmExporter:
   enabled: true
 
-operator:                           # Use containerd as the runtime on GKE
+operator:
   defaultRuntime: containerd
+  runtimeClass: ""
 
 gfd:
   enabled: false                    # GKE sets GPU labels automatically
 
+cdi:
+  enabled: true
+  default: true
+
+hostPaths:
+  driverInstallDir: /home/kubernetes/bin/nvidia
 
 # NVSentinel-specific configuration for GPU health monitor
 # (This is for NVSentinel chart, not GPU Operator)

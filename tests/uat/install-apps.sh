@@ -48,6 +48,7 @@ GPU_OPERATOR_VALUES="${VALUES_DIR}/gpu-operator-values.yaml"
 CERT_MANAGER_VALUES="${VALUES_DIR}/cert-manager-values.yaml"
 NVSENTINEL_VALUES="${VALUES_DIR}/nvsentinel-values.yaml"
 NVSENTINEL_CHART="${REPO_ROOT}/distros/kubernetes/nvsentinel"
+RESOURCE_QUOTA_RESOURCE="${VALUES_DIR}/resource-quota.yaml"
 
 # ARM64-specific values file (if needed)
 NVSENTINEL_ARM64_VALUES="${REPO_ROOT}/distros/kubernetes/nvsentinel/values-tilt-arm64.yaml"
@@ -158,6 +159,14 @@ install_gpu_operator() {
         --version "$GPU_OPERATOR_VERSION" \
         --wait; then
         error "Failed to install GPU Operator"
+    fi
+
+    if [[ "$CSP" == "gcp" ]]; then
+        log "Applying resource quota for GPU Operator on GCP..."
+        if ! kubectl apply -f "$RESOURCE_QUOTA_RESOURCE" -n gpu-operator; then
+            error "Failed to apply resource quota for GPU Operator"
+        fi
+        log "Resource quota applied successfully ✓"
     fi
     
     log "GPU Operator installed successfully ✓"
@@ -299,8 +308,6 @@ main() {
         create_fake_gpu_nodes
         install_fake_gpu_stack
         wait_for_fake_gpu_stack
-    elif [[ "$CSP" == "gcp" ]]; then
-        log "Skipping GPU Operator installation - GKE drivers are pre-installed for A4* instances"
     else
         install_gpu_operator
         wait_for_gpu_operator
