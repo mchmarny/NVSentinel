@@ -118,7 +118,7 @@ variable "gpu_driver_version" {
 variable "image_type" {
   description = "Node image type"
   type        = string
-  default     = "COS_CONTAINERD"
+  default     = "UBUNTU_CONTAINERD"
 }
 
 # Resource labels
@@ -126,4 +126,18 @@ variable "resource_labels" {
   description = "Labels to apply to all resources"
   type        = map(string)
   default     = {}
+}
+
+# Accelerator types
+variable "accelerator_type" {
+  description = "GPU accelerator type to be used in the cluster"
+  type        = string
+  default     = "nvidia-h100-mega-80gb"
+}
+
+# Accelerator count 
+variable "accelerator_count" {
+  description = "Number of GPU accelerators per node"
+  type        = number
+  default     = 8
 }

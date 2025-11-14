@@ -151,12 +151,13 @@ resource "google_container_node_pool" "gpu_pool" {
     # Node labels
     labels = {
       workload-type = "gpu"
+      gke-no-default-nvidia-gpu-device-plugin = true
     }
 
     # GPU configuration
     guest_accelerator {
-      type  = "nvidia-h100-mega-80gb"
-      count = 8
+      type  = var.accelerator_type
+      count = var.accelerator_count
       gpu_driver_installation_config {
         gpu_driver_version = var.gpu_driver_version  # "DEFAULT" for auto-install, "INSTALLATION_DISABLED" for manual
       }

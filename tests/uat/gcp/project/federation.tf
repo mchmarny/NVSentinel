@@ -1,6 +1,7 @@
 locals {
   # List of roles that will be assigned to the pulbisher service account
   publisher_roles = toset([
+    "roles/compute.instanceAdmin.v1",
     "roles/compute.networkAdmin",
     "roles/container.admin",              # Full Kubernetes Engine Admin (includes RBAC permissions)
     "roles/container.clusterAdmin",       # Cluster management permissions
